@@ -1,0 +1,21 @@
+*.iml
+.gradle/
+.idea/
+build/
+app/build/
+local.properties
+*.hprof
+
+# Android signing and release artifacts
+*.jks
+*.keystore
+*.p12
+*.pem
+*.apk
+*.aab
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
