@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.first
 import java.io.File
 
 @Database(
-    entities = [CardGroup::class, Card::class, Task::class, PiggyEntry::class, AppSetting::class],
-    version = 8,
+    entities = [CardGroup::class, Card::class, Task::class, PiggyEntry::class, AssetPlan::class, AppSetting::class],
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,6 +19,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun cardDao(): CardDao
     abstract fun taskDao(): TaskDao
     abstract fun piggyDao(): PiggyDao
+    abstract fun assetPlanDao(): AssetPlanDao
     abstract fun settingDao(): SettingDao
 
     companion object {
@@ -48,6 +49,91 @@ abstract class AppDatabase : RoomDatabase() {
         private val M_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE cards ADD COLUMN imageOrientation TEXT NOT NULL DEFAULT 'horizontal'")
+            }
+        }
+
+        private val M_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS asset_plans (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        name TEXT NOT NULL DEFAULT '',
+                        cardId TEXT NOT NULL DEFAULT '',
+                        platform TEXT NOT NULL DEFAULT '',
+                        category TEXT NOT NULL DEFAULT '',
+                        code TEXT NOT NULL DEFAULT '',
+                        currency TEXT NOT NULL DEFAULT 'CNY',
+                        initialCapital REAL NOT NULL DEFAULT 0,
+                        initialDate TEXT NOT NULL DEFAULT '',
+                        ratePlansJson TEXT NOT NULL DEFAULT '',
+                        pauseRangesJson TEXT NOT NULL DEFAULT '',
+                        adjustmentsJson TEXT NOT NULL DEFAULT '',
+                        overridesJson TEXT NOT NULL DEFAULT '',
+                        cycleDays INTEGER NOT NULL DEFAULT 1,
+                        monthlyDay INTEGER NOT NULL DEFAULT 0,
+                        weeklyDay INTEGER NOT NULL DEFAULT 0,
+                        skipMissingMonthlyDate INTEGER NOT NULL DEFAULT 0,
+                        postponeNonTrading INTEGER NOT NULL DEFAULT 0,
+                        includeFirstDay INTEGER NOT NULL DEFAULT 1,
+                        status TEXT NOT NULL DEFAULT 'running',
+                        frozenAmount REAL NOT NULL DEFAULT 0,
+                        countInTotal INTEGER NOT NULL DEFAULT 1,
+                        skipWeekends INTEGER NOT NULL DEFAULT 1,
+                        orderIndex INTEGER NOT NULL DEFAULT 0,
+                        startDate TEXT NOT NULL DEFAULT ''
+                    )
+                """.trimIndent())
+            }
+        }
+
+        private val M_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                if (!db.hasColumn("asset_plans", "cardId")) {
+                    db.execSQL("ALTER TABLE asset_plans ADD COLUMN cardId TEXT NOT NULL DEFAULT ''")
+                }
+                db.execSQL("""
+                    INSERT OR IGNORE INTO asset_plans (
+                        id, name, cardId, platform, category, code, currency,
+                        initialCapital, initialDate, ratePlansJson, pauseRangesJson, adjustmentsJson, overridesJson,
+                        cycleDays, monthlyDay, weeklyDay, skipMissingMonthlyDate, postponeNonTrading,
+                        includeFirstDay, status, frozenAmount, countInTotal, skipWeekends, orderIndex, startDate
+                    )
+                    SELECT
+                        'task_' || id,
+                        name,
+                        cardId,
+                        '',
+                        '',
+                        '',
+                        'CNY',
+                        0,
+                        COALESCE(NULLIF(startDate, ''), NULLIF(date, ''), date('now')),
+                        '[{"startDate":"' || COALESCE(NULLIF(startDate, ''), NULLIF(date, ''), date('now')) || '","amount":' || ABS(investAmount) || '}]',
+                        '[]',
+                        '[]',
+                        '[]',
+                        CASE
+                            WHEN freq = 'once' THEN 0
+                            WHEN freq = 'weekly' THEN 7
+                            WHEN freq = 'monthly' THEN 30
+                            WHEN freq = 'ndays' THEN CASE WHEN ndays > 0 THEN ndays ELSE 1 END
+                            ELSE 90
+                        END,
+                        CASE WHEN freq = 'monthly' THEN CASE WHEN day > 0 THEN day ELSE 1 END ELSE 0 END,
+                        CASE WHEN freq = 'weekly' THEN CASE WHEN weekday BETWEEN 1 AND 7 THEN weekday ELSE 1 END ELSE 0 END,
+                        0,
+                        CASE WHEN holidays = 'allowNonTradingDays' THEN 0 ELSE 1 END,
+                        1,
+                        'running',
+                        0,
+                        1,
+                        CASE WHEN holidays = 'allowNonTradingDays' THEN 0 ELSE 1 END,
+                        CAST(strftime('%s','now') AS INTEGER) * 1000,
+                        COALESCE(NULLIF(startDate, ''), NULLIF(date, ''), date('now'))
+                    FROM tasks
+                    WHERE isInvest = 1 AND ABS(investAmount) > 0
+                """.trimIndent())
+                db.execSQL("DELETE FROM tasks WHERE isInvest = 1")
             }
         }
 
@@ -105,9 +191,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private fun SupportSQLiteDatabase.hasColumn(tableName: String, columnName: String): Boolean {
+            query("PRAGMA table_info($tableName)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameIndex >= 0 && cursor.getString(nameIndex) == columnName) return true
+                }
+            }
+            return false
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "cardmanager.db")
-                .addMigrations(M_1_2, M_2_3, M_3_4, M_4_5, M_5_6, M_6_7, M_7_8)
+                .addMigrations(M_1_2, M_2_3, M_3_4, M_4_5, M_5_6, M_6_7, M_7_8, M_8_9, M_9_10)
                 .build().also { INSTANCE = it }
         }
     }
@@ -124,14 +220,12 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     private val passwordBackupFlag = 1
     private val exportedSettingKeys = setOf(
         "theme",
-        "pigCard",
-        "piggyTask",
-        "piggySyncFromStart",
-        "piggyTaskSyncRules",
+        "vaultCurrency",
         "preferHighRefreshRate",
         "cardsPerRowPortrait",
         "cardsPerRowLandscape",
         "ungroupedMode",
+        "cardGalleryMode",
         "tabOrder",
         "visibleOptionalTabs",
         "visibleDataCharts",
@@ -145,6 +239,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     val cards: Flow<List<Card>> = db.cardDao().getAllCards()
     val tasks: Flow<List<Task>> = db.taskDao().getAllTasks()
     val piggyEntries: Flow<List<PiggyEntry>> = db.piggyDao().getAllEntries()
+    val assetPlans: Flow<List<AssetPlan>> = db.assetPlanDao().getAllPlans()
 
     suspend fun saveGroup(g: CardGroup) = db.groupDao().insert(g)
     suspend fun updateGroup(g: CardGroup) = db.groupDao().update(g)
@@ -176,10 +271,28 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     suspend fun saveTask(t: Task) = db.taskDao().insert(t)
     suspend fun updateTask(t: Task) = db.taskDao().update(t)
     suspend fun deleteTask(t: Task) = db.taskDao().delete(t)
+    suspend fun migrateLegacyInvestTasksToAssetPlans() {
+        val investTasks = tasks.first().filter { it.isInvest }
+        val legacy = investTasks.filter { kotlin.math.abs(it.investAmount) > 0.0 }
+        if (investTasks.isEmpty()) return
+        db.withTransaction {
+            legacy.forEachIndexed { index, task ->
+                db.assetPlanDao().insert(assetPlanFromTask(task, index))
+                db.taskDao().delete(task)
+            }
+            investTasks.filter { kotlin.math.abs(it.investAmount) <= 0.0 }.forEach {
+                db.taskDao().delete(it)
+            }
+        }
+    }
 
     suspend fun savePiggy(e: PiggyEntry) = db.piggyDao().insert(e)
     suspend fun updatePiggy(e: PiggyEntry) = db.piggyDao().update(e)
     suspend fun deletePiggy(e: PiggyEntry) = db.piggyDao().delete(e)
+
+    suspend fun saveAssetPlan(plan: AssetPlan) = db.assetPlanDao().insert(plan)
+    suspend fun updateAssetPlan(plan: AssetPlan) = db.assetPlanDao().update(plan)
+    suspend fun deleteAssetPlan(plan: AssetPlan) = db.assetPlanDao().delete(plan)
 
     suspend fun getSetting(key: String, default: String = "") = db.settingDao().get(key)?.value ?: default
     suspend fun setSetting(key: String, value: String) = db.settingDao().set(AppSetting(key, value))
@@ -189,11 +302,12 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
 
     suspend fun exportEncryptedBackup(ctx: android.content.Context, uri: android.net.Uri, password: String? = null) {
         val grps = groups.first(); val cds = cards.first()
-        val tsks = tasks.first();  val pig = piggyEntries.first()
+        val tsks = tasks.first().filterNot { it.isInvest };  val pig = piggyEntries.first()
+        val plans = assetPlans.first()
         val settings = db.settingDao().getAllOnce()
             .filter { it.key in exportedSettingKeys && it.key != "custom_font_path" }
             .distinctBy { it.key }
-        val zipBytes = buildZipBytes(ctx, grps, cds, tsks, pig, settings)
+        val zipBytes = buildZipBytes(ctx, grps, cds, tsks, pig, plans, settings)
         val encryptedBytes = encryptBackup(zipBytes, password)
 
         val output = ctx.contentResolver.openOutputStream(uri)
@@ -204,8 +318,9 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     }
 
     private fun buildZipBytes(ctx: android.content.Context, grps: List<CardGroup>, cds: List<Card>,
-                              tsks: List<Task>, pig: List<PiggyEntry>, settings: List<AppSetting>): ByteArray {
-        val json = buildZipJson(grps, cds, tsks, pig, settings)
+                              tsks: List<Task>, pig: List<PiggyEntry>, plans: List<AssetPlan>,
+                              settings: List<AppSetting>): ByteArray {
+        val json = buildZipJson(grps, cds, tsks, pig, plans, settings)
         val buffer = java.io.ByteArrayOutputStream()
         java.util.zip.ZipOutputStream(buffer).use { zip ->
             zip.putNextEntry(java.util.zip.ZipEntry("data.json"))
@@ -365,7 +480,8 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     }
 
     private fun buildZipJson(grps: List<CardGroup>, cds: List<Card>,
-                             tsks: List<Task>, pig: List<PiggyEntry>, settings: List<AppSetting>): String {
+                             tsks: List<Task>, pig: List<PiggyEntry>, plans: List<AssetPlan>,
+                             settings: List<AppSetting>): String {
         fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         val sb = StringBuilder("{\"version\":2")
         sb.append(",\"groups\":[${grps.joinToString(",") { g ->
@@ -399,6 +515,18 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             "{\"id\":${e.id},\"amount\":${e.amount},\"desc\":\"${esc(e.desc)}\"," +
             "\"cardId\":\"${e.cardId}\",\"date\":\"${e.date}\",\"ts\":${e.timestamp}}"
         }}]}")
+        sb.insert(sb.length - 1, ",\"assetPlans\":[${plans.joinToString(",") { p ->
+            "{\"id\":\"${esc(p.id)}\",\"name\":\"${esc(p.name)}\",\"cardId\":\"${esc(p.cardId)}\",\"platform\":\"${esc(p.platform)}\"," +
+            "\"category\":\"${esc(p.category)}\",\"code\":\"${esc(p.code)}\",\"currency\":\"${esc(p.currency)}\"," +
+            "\"initialCapital\":${p.initialCapital},\"initialDate\":\"${esc(p.initialDate)}\"," +
+            "\"ratePlansJson\":\"${esc(p.ratePlansJson)}\",\"pauseRangesJson\":\"${esc(p.pauseRangesJson)}\"," +
+            "\"adjustmentsJson\":\"${esc(p.adjustmentsJson)}\",\"overridesJson\":\"${esc(p.overridesJson)}\"," +
+            "\"cycleDays\":${p.cycleDays},\"monthlyDay\":${p.monthlyDay},\"weeklyDay\":${p.weeklyDay}," +
+            "\"skipMissingMonthlyDate\":${p.skipMissingMonthlyDate},\"postponeNonTrading\":${p.postponeNonTrading}," +
+            "\"includeFirstDay\":${p.includeFirstDay},\"status\":\"${esc(p.status)}\",\"frozenAmount\":${p.frozenAmount}," +
+            "\"countInTotal\":${p.countInTotal},\"skipWeekends\":${p.skipWeekends},\"orderIndex\":${p.orderIndex}," +
+            "\"startDate\":\"${esc(p.startDate)}\"}"
+        }}]")
         sb.insert(sb.length - 1, ",\"settings\":[${settings.joinToString(",") { s ->
             "{\"key\":\"${esc(s.key)}\",\"value\":\"${esc(s.value)}\"}"
         }}]")
@@ -406,9 +534,9 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     }
 
     data class ImportSummary(val groupCount: Int, val cardCount: Int,
-                             val taskCount: Int, val pigCount: Int) {
+                             val taskCount: Int, val pigCount: Int, val assetPlanCount: Int = 0) {
         override fun toString() =
-            "导入成功：${groupCount} 个分组、${cardCount} 张卡、${taskCount} 个任务、${pigCount} 条记录"
+            "导入成功：${groupCount} 个分组、${cardCount} 张卡、${taskCount} 个任务、${pigCount} 条记录、${assetPlanCount} 个投资任务"
     }
 
     suspend fun importBackup(
@@ -464,6 +592,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             db.withTransaction {
                 db.taskDao().deleteAll()
                 db.piggyDao().deleteAll()
+                db.assetPlanDao().deleteAll()
                 db.cardDao().deleteAll()
                 db.groupDao().deleteAll()
             }
@@ -547,7 +676,15 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             holidays = t.optString("holidays", ""))
         listOf("monthlyTasks","weeklyTasks","quarterlyTasks","ndaysTasks","onceTasks").forEach { key ->
             val arr = root.optJSONArray(key) ?: return@forEach
-            for (i in 0 until arr.length()) { db.taskDao().insert(parseTask(arr.getJSONObject(i))); taskCount++ }
+            for (i in 0 until arr.length()) {
+                val task = parseTask(arr.getJSONObject(i))
+                if (task.isInvest && kotlin.math.abs(task.investAmount) > 0.0) {
+                    db.assetPlanDao().insert(assetPlanFromTask(task, i))
+                } else if (!task.isInvest) {
+                    db.taskDao().insert(task)
+                    taskCount++
+                }
+            }
         }
 
         // Piggy
@@ -560,7 +697,12 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 date = e.getString("date"), timestamp = e.optLong("ts", e.getLong("id"))))
         }
 
-        return ImportSummary(grpsArr.length(), cdsArr.length(), taskCount, pigArr.length())
+        val assetArr = root.optJSONArray("assetPlans") ?: org.json.JSONArray()
+        for (i in 0 until assetArr.length()) {
+            db.assetPlanDao().insert(parseAssetPlan(assetArr.getJSONObject(i), i))
+        }
+
+        return ImportSummary(grpsArr.length(), cdsArr.length(), taskCount, pigArr.length(), assetArr.length())
     }
 
     private suspend fun importSettings(
@@ -593,7 +735,8 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
 
     suspend fun exportData(): String {
         val grps = groups.first(); val cds = cards.first()
-        val tsks = tasks.first(); val pig = piggyEntries.first()
+        val tsks = tasks.first().filterNot { it.isInvest }; val pig = piggyEntries.first()
+        val plans = assetPlans.first()
         fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         val sb = StringBuilder("{")
         sb.append("\"groups\":[${grps.joinToString(",") { g -> "{\"id\":\"${g.id}\",\"name\":\"${esc(g.name)}\",\"icon\":\"${g.icon}\",\"isOpen\":${g.isOpen},\"order\":${g.sortOrder}}" }}]")
@@ -608,8 +751,83 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         sb.append(",\"ndaysTasks\":[${ndays.joinToString(",") { tj(it) }}]")
         sb.append(",\"onceTasks\":[${once.joinToString(",") { tj(it) }}]")
         sb.append(",\"pig\":[${pig.joinToString(",") { e -> "{\"id\":${e.id},\"amount\":${e.amount},\"desc\":\"${esc(e.desc)}\",\"cardId\":\"${e.cardId}\",\"date\":\"${e.date}\",\"ts\":${e.timestamp}}" }}]}")
+        sb.insert(sb.length - 1, ",\"assetPlans\":[${plans.joinToString(",") { p -> assetPlanJson(p, ::esc) }}]")
         return sb.toString()
     }
+
+    private fun assetPlanFromTask(task: Task, index: Int): AssetPlan {
+        val start = task.startDate.ifBlank { task.date.ifBlank { java.time.LocalDate.now().toString() } }
+        val amount = kotlin.math.abs(task.investAmount)
+        val cycle = when (task.freq) {
+            "once" -> 0
+            "weekly" -> 7
+            "monthly" -> 30
+            "ndays" -> task.ndays.coerceAtLeast(1)
+            else -> 90
+        }
+        val avoidsNonTrading = task.holidays != TaskHolidayPolicy.ALLOW_NON_TRADING_DAYS
+        return AssetPlan(
+            id = "task_${task.id.ifBlank { java.util.UUID.randomUUID().toString() }}",
+            name = task.name,
+            cardId = task.cardId,
+            currency = "CNY",
+            ratePlansJson = AssetPlanCodec.encodeRatePlans(listOf(AssetRatePlan(start, amount))),
+            pauseRangesJson = "",
+            adjustmentsJson = AssetPlanCodec.encodeAdjustments(emptyList()),
+            overridesJson = AssetPlanCodec.encodeOverrides(emptyList()),
+            cycleDays = cycle,
+            monthlyDay = if (task.freq == "monthly") task.day.coerceIn(1, 31) else 0,
+            weeklyDay = if (task.freq == "weekly") task.weekday.coerceIn(1, 7) else 0,
+            postponeNonTrading = avoidsNonTrading,
+            includeFirstDay = true,
+            countInTotal = true,
+            skipWeekends = avoidsNonTrading,
+            orderIndex = System.currentTimeMillis() - index,
+            startDate = start,
+            initialDate = start
+        )
+    }
+
+    private fun parseAssetPlan(o: org.json.JSONObject, index: Int): AssetPlan =
+        AssetPlan(
+            id = o.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
+            name = o.optString("name", ""),
+            cardId = o.optString("cardId", ""),
+            platform = o.optString("platform", ""),
+            category = o.optString("category", ""),
+            code = o.optString("code", ""),
+            currency = o.optString("currency", "CNY"),
+            initialCapital = o.optDouble("initialCapital", 0.0),
+            initialDate = o.optString("initialDate", ""),
+            ratePlansJson = o.optString("ratePlansJson", ""),
+            pauseRangesJson = o.optString("pauseRangesJson", ""),
+            adjustmentsJson = o.optString("adjustmentsJson", ""),
+            overridesJson = o.optString("overridesJson", ""),
+            cycleDays = o.optInt("cycleDays", 1),
+            monthlyDay = o.optInt("monthlyDay", 0),
+            weeklyDay = o.optInt("weeklyDay", 0),
+            skipMissingMonthlyDate = o.optBoolean("skipMissingMonthlyDate", false),
+            postponeNonTrading = o.optBoolean("postponeNonTrading", false),
+            includeFirstDay = o.optBoolean("includeFirstDay", true),
+            status = o.optString("status", AssetPlanStatus.RUNNING),
+            frozenAmount = o.optDouble("frozenAmount", 0.0),
+            countInTotal = o.optBoolean("countInTotal", true),
+            skipWeekends = o.optBoolean("skipWeekends", true),
+            orderIndex = o.optLong("orderIndex", index.toLong()),
+            startDate = o.optString("startDate", "")
+        )
+
+    private fun assetPlanJson(p: AssetPlan, esc: (String) -> String): String =
+        "{\"id\":\"${esc(p.id)}\",\"name\":\"${esc(p.name)}\",\"cardId\":\"${esc(p.cardId)}\",\"platform\":\"${esc(p.platform)}\"," +
+            "\"category\":\"${esc(p.category)}\",\"code\":\"${esc(p.code)}\",\"currency\":\"${esc(p.currency)}\"," +
+            "\"initialCapital\":${p.initialCapital},\"initialDate\":\"${esc(p.initialDate)}\"," +
+            "\"ratePlansJson\":\"${esc(p.ratePlansJson)}\",\"pauseRangesJson\":\"${esc(p.pauseRangesJson)}\"," +
+            "\"adjustmentsJson\":\"${esc(p.adjustmentsJson)}\",\"overridesJson\":\"${esc(p.overridesJson)}\"," +
+            "\"cycleDays\":${p.cycleDays},\"monthlyDay\":${p.monthlyDay},\"weeklyDay\":${p.weeklyDay}," +
+            "\"skipMissingMonthlyDate\":${p.skipMissingMonthlyDate},\"postponeNonTrading\":${p.postponeNonTrading}," +
+            "\"includeFirstDay\":${p.includeFirstDay},\"status\":\"${esc(p.status)}\",\"frozenAmount\":${p.frozenAmount}," +
+            "\"countInTotal\":${p.countInTotal},\"skipWeekends\":${p.skipWeekends},\"orderIndex\":${p.orderIndex}," +
+            "\"startDate\":\"${esc(p.startDate)}\"}"
 
     private fun deleteImagesIfOwned(card: Card) {
         val ctx = context ?: return

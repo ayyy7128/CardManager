@@ -70,6 +70,68 @@ data class PiggyEntry(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "asset_plans")
+data class AssetPlan(
+    @PrimaryKey val id: String,
+    val name: String = "",
+    val cardId: String = "",
+    val platform: String = "",
+    val category: String = "",
+    val code: String = "",
+    val currency: String = "CNY",
+    val initialCapital: Double = 0.0,
+    val initialDate: String = "",
+    val ratePlansJson: String = "",
+    val pauseRangesJson: String = "",
+    val adjustmentsJson: String = "",
+    val overridesJson: String = "",
+    val cycleDays: Int = 1,
+    val monthlyDay: Int = 0,
+    val weeklyDay: Int = 0,
+    val skipMissingMonthlyDate: Boolean = false,
+    val postponeNonTrading: Boolean = false,
+    val includeFirstDay: Boolean = true,
+    val status: String = AssetPlanStatus.RUNNING,
+    val frozenAmount: Double = 0.0,
+    val countInTotal: Boolean = true,
+    val skipWeekends: Boolean = true,
+    val orderIndex: Long = 0,
+    val startDate: String = ""
+)
+
+object AssetPlanStatus {
+    const val RUNNING = "running"
+    const val STOPPED = "stopped"
+}
+
+object AssetLogType {
+    const val INITIAL = "initial"
+    const val PERIODIC = "periodic"
+    const val ADJUSTMENT = "adjustment"
+    const val SKIP_WEEKEND = "skipWeekend"
+    const val SKIP_PAUSE = "skipPause"
+    const val POSTPONED = "postponed"
+}
+
+data class AssetRatePlan(val startDate: String, val amount: Double)
+data class AssetAdjustment(val date: String, val amount: Double, val note: String = "")
+data class AssetOverrideLog(
+    val date: String,
+    val amount: Double,
+    val status: String,
+    val note: String = "",
+    val isDeleted: Boolean = false
+)
+data class AssetTransactionLog(
+    val date: String,
+    val amount: Double,
+    val status: String,
+    val currency: String,
+    val type: String,
+    val note: String = ""
+)
+data class AssetCalcResult(val amount: Double, val logs: List<AssetTransactionLog>)
+
 @Entity(tableName = "settings")
 data class AppSetting(
     @PrimaryKey val key: String,

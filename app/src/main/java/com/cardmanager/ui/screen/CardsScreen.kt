@@ -97,6 +97,7 @@ fun CardsScreen(vm: MainViewModel) {
     val cardsPerRowPortrait by vm.cardsPerRowPortrait.collectAsState()
     val cardsPerRowLandscape by vm.cardsPerRowLandscape.collectAsState()
     val ungroupedMode by vm.ungroupedMode.collectAsState()
+    val galleryMode by vm.cardGalleryMode.collectAsState()
 
     var showAddGroup  by remember { mutableStateOf(false) }
     var editingGroup  by remember { mutableStateOf<CardGroup?>(null) }
@@ -105,7 +106,6 @@ fun CardsScreen(vm: MainViewModel) {
     var deletingGroup by remember { mutableStateOf<CardGroup?>(null) }
     var deletingCard  by remember { mutableStateOf<Card?>(null) }
     var showCreateMenu by remember { mutableStateOf(false) }
-    var galleryMode   by remember { mutableStateOf(true) }
     var showFilter    by remember { mutableStateOf(false) }
     var searchQuery   by remember { mutableStateOf("") }
 
@@ -284,8 +284,8 @@ fun CardsScreen(vm: MainViewModel) {
 
                     // 视图切换
                     Row(Modifier.clip(RoundedCornerShape(8.dp)).background(cs.surfaceVariant)) {
-                        ViewToggleBtn(Icons.Default.GridView, galleryMode) { galleryMode = true }
-                        ViewToggleBtn(Icons.Default.ViewList, !galleryMode) { galleryMode = false }
+                        ViewToggleBtn(Icons.Default.GridView, galleryMode) { vm.setCardGalleryMode(true) }
+                        ViewToggleBtn(Icons.Default.ViewList, !galleryMode) { vm.setCardGalleryMode(false) }
                     }
                         }
                     }
@@ -937,8 +937,11 @@ fun CardGalleryItem(
     }
 
     BoxWithConstraints(modifier) {
-        val verticalCardHeight = (maxWidth / 1.586f) + if (compact) 46.dp else 70.dp
-        val verticalFaceHeight = verticalCardHeight - if (compact) 30.dp else 38.dp
+        val showNote = card.note.isNotEmpty() && !dense
+        val verticalNoteHeight = if (showNote) (if (compact) 12.dp else 16.dp) else 0.dp
+        val baseVerticalCardHeight = (maxWidth / 1.586f) + if (compact) 46.dp else 70.dp
+        val verticalCardHeight = baseVerticalCardHeight + verticalNoteHeight
+        val verticalFaceHeight = baseVerticalCardHeight - if (compact) 30.dp else 38.dp
         val containerModifier = Modifier
             .fillMaxWidth()
             .clip(ItemShape)
@@ -956,10 +959,17 @@ fun CardGalleryItem(
                     CardFace(Modifier.height(verticalFaceHeight).aspectRatio(0.63f))
                     VerticalCardInfo(Modifier.weight(1f).height(verticalFaceHeight))
                 }
-                Text(displayName, fontWeight = FontWeight.Bold, fontSize = titleFont, lineHeight = titleLineHeight,
-                    color = cs.onSurface,
-                    modifier = Modifier.fillMaxWidth(),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(displayName, fontWeight = FontWeight.Bold, fontSize = titleFont, lineHeight = titleLineHeight,
+                        color = cs.onSurface,
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (showNote) {
+                        Text(card.note, fontSize = noteFont, color = cs.onSurfaceVariant.copy(.5f),
+                            modifier = Modifier.fillMaxWidth(),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
         } else {
             Column(containerModifier) {

@@ -97,6 +97,25 @@ interface PiggyDao {
     suspend fun deleteAll()
 }
 
+// ─── 资产计划 DAO ───────────────────────────────────────
+@Dao
+interface AssetPlanDao {
+    @Query("SELECT * FROM asset_plans ORDER BY orderIndex DESC")
+    fun getAllPlans(): Flow<List<AssetPlan>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(plan: AssetPlan)
+
+    @Update
+    suspend fun update(plan: AssetPlan)
+
+    @Delete
+    suspend fun delete(plan: AssetPlan)
+
+    @Query("DELETE FROM asset_plans")
+    suspend fun deleteAll()
+}
+
 // ─── 设置 DAO ─────────────────────────────────────────────
 @Dao
 interface SettingDao {

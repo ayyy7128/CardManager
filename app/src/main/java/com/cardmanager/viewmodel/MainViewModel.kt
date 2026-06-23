@@ -30,8 +30,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val cards  = repo.cards.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val tasks  = repo.tasks.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val piggyEntries = repo.piggyEntries.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val assetPlans = repo.assetPlans.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     private val _imageVersion = MutableStateFlow(0)
     val imageVersion: StateFlow<Int> = _imageVersion
+    private val _assetTradingCalendarVersion = MutableStateFlow(0)
+    val assetTradingCalendarVersion: StateFlow<Int> = _assetTradingCalendarVersion
+    private var loadedAssetPlanTradingYears: Set<Int> = emptySet()
 
     private val _themeMode = MutableStateFlow(sanitizeThemeMode(prefs.getString("theme", "light") ?: "light"))
     val themeMode: StateFlow<String> = _themeMode
@@ -45,6 +49,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val piggySyncFromStart: StateFlow<Boolean> = _piggySyncFromStart
     private val _piggyTaskSyncRules = MutableStateFlow<Map<String, PiggyTaskSyncRule>>(emptyMap())
     val piggyTaskSyncRules: StateFlow<Map<String, PiggyTaskSyncRule>> = _piggyTaskSyncRules
+    private val _vaultCurrency = MutableStateFlow(ExchangeRateService.sanitizeCurrency(prefs.getString("vaultCurrency", "CNY") ?: "CNY"))
+    val vaultCurrency: StateFlow<String> = _vaultCurrency
+    private val _exchangeRates = MutableStateFlow(ExchangeRateService.fallbackRates)
+    val exchangeRates: StateFlow<Map<String, Double>> = _exchangeRates
     private val _preferHighRefreshRate = MutableStateFlow(prefs.getString("preferHighRefreshRate", "false").toBoolean())
     val preferHighRefreshRate: StateFlow<Boolean> = _preferHighRefreshRate
     private val _cardsPerRowPortrait = MutableStateFlow(prefs.getString("cardsPerRowPortrait", "2")?.toIntOrNull()?.coerceIn(1, 4) ?: 2)
@@ -53,6 +61,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val cardsPerRowLandscape: StateFlow<Int> = _cardsPerRowLandscape
     private val _ungroupedMode = MutableStateFlow(prefs.getString("ungroupedMode", "false").toBoolean())
     val ungroupedMode: StateFlow<Boolean> = _ungroupedMode
+    private val _cardGalleryMode = MutableStateFlow(prefs.getString("cardGalleryMode", "true").toBoolean())
+    val cardGalleryMode: StateFlow<Boolean> = _cardGalleryMode
     private val _tabOrder = MutableStateFlow(sanitizeTabOrder(prefs.getString("tabOrder", defaultTabOrder.joinToString(",")) ?: defaultTabOrder.joinToString(",")))
     val tabOrder: StateFlow<List<String>> = _tabOrder
     private val _visibleOptionalTabs = MutableStateFlow(sanitizeVisibleOptionalTabs(prefs.getString("visibleOptionalTabs", optionalTabIds.joinToString(",")) ?: optionalTabIds.joinToString(",")))
@@ -68,6 +78,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
+            repo.migrateLegacyInvestTasksToAssetPlans()
             val theme = sanitizeThemeMode(repo.getSetting("theme", prefs.getString("theme", "light") ?: "light"))
             prefs.edit().putString("theme", theme).apply()
             _themeMode.value = theme
@@ -87,6 +98,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val landscapeRows = repo.getSetting("cardsPerRowLandscape", prefs.getString("cardsPerRowLandscape", "3") ?: "3")
                 .toIntOrNull()?.coerceIn(1, 6) ?: 3
             val ungrouped = repo.getSetting("ungroupedMode", prefs.getString("ungroupedMode", "false") ?: "false").toBoolean()
+            val cardGalleryMode = repo.getSetting("cardGalleryMode", prefs.getString("cardGalleryMode", "true") ?: "true").toBoolean()
             val tabOrder = sanitizeTabOrder(repo.getSetting("tabOrder", prefs.getString("tabOrder", defaultTabOrder.joinToString(",")) ?: defaultTabOrder.joinToString(",")))
             val visibleOptionalTabs = sanitizeVisibleOptionalTabs(repo.getSetting("visibleOptionalTabs", prefs.getString("visibleOptionalTabs", optionalTabIds.joinToString(",")) ?: optionalTabIds.joinToString(",")))
             val visibleDataCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", prefs.getString("visibleDataCharts", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
@@ -94,28 +106,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val visibleDataOverview = sanitizeDataOverview(repo.getSetting("visibleDataOverview", prefs.getString("visibleDataOverview", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
             val dataOverviewOrder = sanitizeDataOverviewOrder(repo.getSetting("dataOverviewOrder", prefs.getString("dataOverviewOrder", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
             val preferHighRefreshRate = repo.getSetting("preferHighRefreshRate", prefs.getString("preferHighRefreshRate", "false") ?: "false").toBoolean()
+            val vaultCurrency = ExchangeRateService.sanitizeCurrency(repo.getSetting("vaultCurrency", prefs.getString("vaultCurrency", "CNY") ?: "CNY"))
             prefs.edit()
                 .putString("cardsPerRowPortrait", portraitRows.toString())
                 .putString("cardsPerRowLandscape", landscapeRows.toString())
                 .putString("ungroupedMode", ungrouped.toString())
+                .putString("cardGalleryMode", cardGalleryMode.toString())
                 .putString("tabOrder", tabOrder.joinToString(","))
                 .putString("visibleOptionalTabs", visibleOptionalTabs.joinToString(","))
                 .putString("visibleDataCharts", visibleDataCharts.joinToString(","))
                 .putString("dataChartOrder", dataChartOrder.joinToString(","))
                 .putString("visibleDataOverview", visibleDataOverview.joinToString(","))
                 .putString("dataOverviewOrder", dataOverviewOrder.joinToString(","))
+                .putString("vaultCurrency", vaultCurrency)
                 .putString("preferHighRefreshRate", preferHighRefreshRate.toString())
                 .apply()
             _cardsPerRowPortrait.value = portraitRows
             _cardsPerRowLandscape.value = landscapeRows
             _ungroupedMode.value = ungrouped
+            _cardGalleryMode.value = cardGalleryMode
             _tabOrder.value = tabOrder
             _visibleOptionalTabs.value = visibleOptionalTabs
             _visibleDataCharts.value = visibleDataCharts
             _dataChartOrder.value = dataChartOrder
             _visibleDataOverview.value = visibleDataOverview
             _dataOverviewOrder.value = dataOverviewOrder
+            _vaultCurrency.value = vaultCurrency
             _preferHighRefreshRate.value = preferHighRefreshRate
+            refreshExchangeRates()
+        }
+        viewModelScope.launch {
+            assetPlans.collect { plans ->
+                if (ensureAssetPlanTradingYearsLoaded(plans)) {
+                    _assetTradingCalendarVersion.value += 1
+                }
+            }
         }
     }
 
@@ -190,6 +215,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repo.setSetting("preferHighRefreshRate", enabled.toString())
         }
     }
+
+    fun setVaultCurrency(currency: String) {
+        val safe = ExchangeRateService.sanitizeCurrency(currency)
+        viewModelScope.launch {
+            _vaultCurrency.value = safe
+            prefs.edit().putString("vaultCurrency", safe).apply()
+            repo.setSetting("vaultCurrency", safe)
+            refreshExchangeRates()
+        }
+    }
+
+    fun cycleVaultCurrency() {
+        val currencies = ExchangeRateService.supportedCurrencies
+        val nextIndex = (currencies.indexOf(_vaultCurrency.value).coerceAtLeast(0) + 1) % currencies.size
+        setVaultCurrency(currencies[nextIndex])
+    }
+
+    fun refreshExchangeRates() {
+        viewModelScope.launch {
+            _exchangeRates.value = ExchangeRateService.fetchRates()
+        }
+    }
+
+    fun convertMoney(amount: Double, from: String, to: String = _vaultCurrency.value): Double =
+        ExchangeRateService.convert(amount, from, to, _exchangeRates.value)
+
+    fun vaultTotalIn(currency: String = _vaultCurrency.value): Double {
+        val entryTotal = piggyEntries.value
+            .filter(::isManualPiggyEntry)
+            .sumOf { convertMoney(it.amount, "CNY", currency) }
+        val planTotal = assetPlans.value
+            .filter { it.countInTotal }
+            .sumOf { convertMoney(assetPlanDisplayAmount(it), it.currency, currency) }
+        return entryTotal + planTotal
+    }
     fun setCardsPerRowPortrait(value: Int) { setCardsPerRow("cardsPerRowPortrait", value, _cardsPerRowPortrait, 4) }
     fun setCardsPerRowLandscape(value: Int) { setCardsPerRow("cardsPerRowLandscape", value, _cardsPerRowLandscape, 6) }
     fun setUngroupedMode(value: Boolean) {
@@ -197,6 +257,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ungroupedMode.value = value
             prefs.edit().putString("ungroupedMode", value.toString()).apply()
             repo.setSetting("ungroupedMode", value.toString())
+        }
+    }
+
+    fun setCardGalleryMode(value: Boolean) {
+        viewModelScope.launch {
+            _cardGalleryMode.value = value
+            prefs.edit().putString("cardGalleryMode", value.toString()).apply()
+            repo.setSetting("cardGalleryMode", value.toString())
         }
     }
 
@@ -497,7 +565,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { LocalDate.parse(task.startDate.ifBlank { task.date.ifBlank { LocalDate.now().toString() } }) }
             .getOrDefault(LocalDate.now())
 
-    private fun taskMatchesDate(task: Task, date: LocalDate): Boolean {
+    fun taskMatchesDate(task: Task, date: LocalDate): Boolean {
         if (TaskHolidayPolicy.avoidsNonTradingDays(task)) {
             if (!TradingDayService.isTradingDay(date)) return false
             if (taskBaseMatchesDate(task, date)) return true
@@ -540,14 +608,73 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ── Piggy ──────────────────────────────────────────────
-    val piggyTotal: StateFlow<Double> = piggyEntries.map { it.sumOf { e -> e.amount } }.stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+    val piggyEntryTotal: StateFlow<Double> = piggyEntries
+        .map { entries -> entries.filter(::isManualPiggyEntry).sumOf { e -> e.amount } }
+        .stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+    val assetPlanTotal: StateFlow<Double> = combine(assetPlans, exchangeRates) { plans, _ ->
+        plans.filter { it.countInTotal }.sumOf { convertMoney(assetPlanDisplayAmount(it), it.currency, "CNY") }
+    }
+        .stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+    val piggyTotal: StateFlow<Double> = combine(piggyEntryTotal, assetPlanTotal) { piggy, assets -> piggy + assets }
+        .stateIn(viewModelScope, SharingStarted.Lazily, 0.0)
+
     fun addPiggyEntry(amount: Double, desc: String) {
         viewModelScope.launch {
-            repo.savePiggy(PiggyEntry(System.currentTimeMillis(), amount, desc, _pigCardId.value, LocalDate.now().toString()))
+            repo.savePiggy(PiggyEntry(System.currentTimeMillis(), amount, desc, "", LocalDate.now().toString()))
         }
     }
     fun updatePiggyEntry(e: PiggyEntry) { viewModelScope.launch { repo.updatePiggy(e) } }
     fun deletePiggyEntry(e: PiggyEntry) { viewModelScope.launch { repo.deletePiggy(e) } }
+
+    private fun isManualPiggyEntry(entry: PiggyEntry): Boolean =
+        !entry.desc.startsWith("任务同步：")
+
+    fun addAssetPlan(plan: AssetPlan) {
+        viewModelScope.launch {
+            repo.saveAssetPlan(plan.copy(
+                id = plan.id.ifBlank { UUID.randomUUID().toString() },
+                orderIndex = if (plan.orderIndex == 0L) System.currentTimeMillis() else plan.orderIndex,
+                startDate = plan.startDate.ifBlank { LocalDate.now().toString() },
+                initialDate = plan.initialDate.ifBlank { plan.startDate.ifBlank { LocalDate.now().toString() } }
+            ))
+        }
+    }
+
+    fun updateAssetPlan(plan: AssetPlan) {
+        viewModelScope.launch { repo.updateAssetPlan(plan) }
+    }
+
+    fun deleteAssetPlan(plan: AssetPlan) {
+        viewModelScope.launch { repo.deleteAssetPlan(plan) }
+    }
+
+    fun archiveAssetPlan(plan: AssetPlan, countInTotal: Boolean) {
+        viewModelScope.launch {
+            val frozen = AssetCalculator.calc(plan).amount
+            repo.updateAssetPlan(plan.copy(
+                status = AssetPlanStatus.STOPPED,
+                frozenAmount = frozen,
+                countInTotal = countInTotal
+            ))
+        }
+    }
+
+    fun restoreAssetPlan(plan: AssetPlan) {
+        viewModelScope.launch {
+            repo.updateAssetPlan(plan.copy(status = AssetPlanStatus.RUNNING))
+        }
+    }
+
+    fun assetPlanDisplayAmount(plan: AssetPlan): Double =
+        if (plan.status == AssetPlanStatus.STOPPED) {
+            if (plan.countInTotal) plan.frozenAmount else 0.0
+        } else {
+            AssetCalculator.calc(plan).amount
+        }
+
+    fun assetPlanLogs(plan: AssetPlan): List<AssetTransactionLog> =
+        AssetCalculator.calc(plan).logs
+
     fun syncPiggyTaskForToday(onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             syncPiggyTasksFrom(LocalDate.now(), onResult)
@@ -641,6 +768,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private suspend fun ensureAssetPlanTradingYearsLoaded(plans: List<AssetPlan>): Boolean {
+        if (plans.isEmpty()) return false
+        val today = LocalDate.now()
+        val dates = plans.flatMap { plan ->
+            buildList {
+                AssetCalculator.parseDate(plan.startDate)?.let { add(it) }
+                AssetCalculator.parseDate(plan.initialDate)?.let { add(it) }
+                AssetPlanCodec.decodeRatePlans(plan.ratePlansJson).forEach { rate ->
+                    AssetCalculator.parseDate(rate.startDate)?.let { add(it) }
+                }
+            }
+        }
+        val from = listOfNotNull(dates.minOrNull(), today).minOrNull() ?: today
+        val to = listOfNotNull(dates.maxOrNull(), today).maxOrNull() ?: today
+        val years = (from.year..to.year).toSet()
+        val yearsToLoad = years.filter { it !in loadedAssetPlanTradingYears || !TradingDayService.isLoaded(it) }
+        if (yearsToLoad.isEmpty()) return false
+        val app = getApplication<Application>()
+        yearsToLoad.forEach { year ->
+            if (!TradingDayService.isLoaded(year)) {
+                TradingDayService.loadYear(year, app)
+            }
+        }
+        loadedAssetPlanTradingYears = loadedAssetPlanTradingYears + years
+        return true
+    }
+
     fun exportBackup(uri: android.net.Uri, password: String?, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val app = getApplication<Application>()
@@ -658,7 +812,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val summary = repo.importBackup(app, uri, mode, password)
                 reloadImportedSettings()
                 onResult(true, app.getString(R.string.import_success_summary,
-                    summary.groupCount, summary.cardCount, summary.taskCount, summary.pigCount))
+                    summary.groupCount, summary.cardCount, summary.taskCount, summary.pigCount, summary.assetPlanCount))
             } catch (e: Exception) { onResult(false, app.getString(R.string.import_failed, e.message ?: "")) }
         }
     }
@@ -670,6 +824,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val landscapeRows = repo.getSetting("cardsPerRowLandscape", _cardsPerRowLandscape.value.toString())
             .toIntOrNull()?.coerceIn(1, 6) ?: 3
         val ungrouped = repo.getSetting("ungroupedMode", _ungroupedMode.value.toString()).toBoolean()
+        val cardGalleryMode = repo.getSetting("cardGalleryMode", _cardGalleryMode.value.toString()).toBoolean()
         val tabOrder = sanitizeTabOrder(repo.getSetting("tabOrder", _tabOrder.value.joinToString(",")))
         val visibleTabs = sanitizeVisibleOptionalTabs(repo.getSetting("visibleOptionalTabs", _visibleOptionalTabs.value.joinToString(",")))
         val visibleCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", _visibleDataCharts.value.joinToString(",")))
@@ -679,6 +834,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val piggyTaskRaw = repo.getSetting("piggyTask", _piggyTaskId.value)
         val legacyPiggySyncFromStart = repo.getSetting("piggySyncFromStart", _piggySyncFromStart.value.toString()).toBoolean()
         val preferHighRefreshRate = repo.getSetting("preferHighRefreshRate", _preferHighRefreshRate.value.toString()).toBoolean()
+        val vaultCurrency = ExchangeRateService.sanitizeCurrency(repo.getSetting("vaultCurrency", _vaultCurrency.value))
 
         _themeMode.value = theme
         _isDark.value = theme == "dark"
@@ -693,25 +849,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _cardsPerRowPortrait.value = portraitRows
         _cardsPerRowLandscape.value = landscapeRows
         _ungroupedMode.value = ungrouped
+        _cardGalleryMode.value = cardGalleryMode
         _tabOrder.value = tabOrder
         _visibleOptionalTabs.value = visibleTabs
         _visibleDataCharts.value = visibleCharts
         _dataChartOrder.value = chartOrder
         _visibleDataOverview.value = visibleOverview
         _dataOverviewOrder.value = overviewOrder
+        _vaultCurrency.value = vaultCurrency
         _preferHighRefreshRate.value = preferHighRefreshRate
+        refreshExchangeRates()
 
         prefs.edit()
             .putString("theme", theme)
             .putString("cardsPerRowPortrait", portraitRows.toString())
             .putString("cardsPerRowLandscape", landscapeRows.toString())
             .putString("ungroupedMode", ungrouped.toString())
+            .putString("cardGalleryMode", cardGalleryMode.toString())
             .putString("tabOrder", tabOrder.joinToString(","))
             .putString("visibleOptionalTabs", visibleTabs.joinToString(","))
             .putString("visibleDataCharts", visibleCharts.joinToString(","))
             .putString("dataChartOrder", chartOrder.joinToString(","))
             .putString("visibleDataOverview", visibleOverview.joinToString(","))
             .putString("dataOverviewOrder", overviewOrder.joinToString(","))
+            .putString("vaultCurrency", vaultCurrency)
             .putString("preferHighRefreshRate", preferHighRefreshRate.toString())
             .apply()
     }
@@ -725,9 +886,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 result.cards.forEach { repo.saveCard(it) }
                 result.tasks.forEach { repo.saveTask(it) }
                 result.piggy.forEach { repo.savePiggy(it) }
+                repo.migrateLegacyInvestTasksToAssetPlans()
                 val app = getApplication<Application>()
                 onResult(true, app.getString(R.string.import_success_summary,
-                    result.groupCount, result.cardCount, result.taskCount, result.piggyCount))
+                    result.groupCount, result.cardCount, result.taskCount, result.piggyCount, 0))
             } catch (e: Exception) {
                 val app = getApplication<Application>()
                 onResult(false, app.getString(R.string.import_failed, e.message ?: ""))

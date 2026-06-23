@@ -1,6 +1,7 @@
 package com.cardmanager.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,16 +28,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
@@ -44,14 +45,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -60,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -78,10 +78,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.window.Dialog
 import com.cardmanager.R
+import com.cardmanager.data.AssetCalculator
+import com.cardmanager.data.AssetLogType
+import com.cardmanager.data.AssetPlan
+import com.cardmanager.data.AssetTransactionLog
 import com.cardmanager.data.Task
-import com.cardmanager.data.TaskHolidayPolicy
+import com.cardmanager.data.AssetPlanStatus
 import com.cardmanager.data.TradingDayService
 import com.cardmanager.ui.components.AppPanel
+import com.cardmanager.ui.components.CreateFabMenu
+import com.cardmanager.ui.components.CreateFabMenuItem
 import com.cardmanager.ui.components.EmptyState
 import com.cardmanager.ui.components.SectionHeader
 import com.cardmanager.ui.components.StatusPill
@@ -103,15 +109,63 @@ fun CalendarScreen(vm: MainViewModel) {
     var month by remember { mutableStateOf(today.monthValue) }
     var selectedDay by remember { mutableStateOf(today.dayOfMonth) }
     var showAddTask by remember { mutableStateOf(false) }
+    var showCreateMenu by remember { mutableStateOf(false) }
+    var showAssetEditor by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
+    var editingAsset by remember { mutableStateOf<com.cardmanager.data.AssetPlan?>(null) }
+    var viewingAsset by remember { mutableStateOf<com.cardmanager.data.AssetPlan?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     val ctx = LocalContext.current
 
     val tasks by vm.tasks.collectAsState()
+    val cards by vm.cards.collectAsState()
+    val regularTasks = remember(tasks) { tasks.filterNot { it.isInvest } }
+    val assetPlans by vm.assetPlans.collectAsState()
+    val vaultCurrency by vm.vaultCurrency.collectAsState()
+    val exchangeRates by vm.exchangeRates.collectAsState()
+    val assetTradingCalendarVersion by vm.assetTradingCalendarVersion.collectAsState()
+    val runningAssetPlans = remember(assetPlans, exchangeRates) { assetPlans.filter { it.status != AssetPlanStatus.STOPPED } }
     var tradingDaysReady by remember(year) { mutableStateOf(TradingDayService.isLoaded(year)) }
-    val taskDots by remember(year, month, tasks, tradingDaysReady) { derivedStateOf { vm.taskDatesForMonth(year, month) } }
-    val postponedTaskDots by remember(year, month, tasks, tradingDaysReady) { derivedStateOf { vm.postponedTaskDatesForMonth(year, month) } }
-    val dayTasks by remember(year, month, selectedDay, tasks, tradingDaysReady) { derivedStateOf { vm.tasksForDate(year, month, selectedDay) } }
+    val selectedDate = remember(year, month, selectedDay) { LocalDate.of(year, month, selectedDay) }
+    val assetPlanLogsById = remember(year, month, selectedDate, runningAssetPlans, exchangeRates, tradingDaysReady, assetTradingCalendarVersion) {
+        val monthStart = LocalDate.of(year, month, 1)
+        val monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth())
+        val todayLimit = LocalDate.now()
+        val until = listOf(monthEnd, selectedDate, todayLimit).maxOrNull() ?: todayLimit
+        runningAssetPlans.associate { it.id to AssetCalculator.calc(it, until).logs }
+    }
+    val assetPlanDots by remember(year, month, assetPlanLogsById) {
+        derivedStateOf {
+            assetPlanLogsById.values
+                .flatMap { logs -> logs.filter(::isCalendarAssetLog) }
+                .mapNotNull { log ->
+                    runCatching { LocalDate.parse(log.date) }.getOrNull()
+                        ?.takeIf { it.year == year && it.monthValue == month }
+                        ?.dayOfMonth
+                }
+                .toSet()
+        }
+    }
+    val regularTaskDots by remember(year, month, regularTasks, tradingDaysReady) { derivedStateOf { vm.taskDatesForMonth(year, month).filter { day -> regularTasks.any { task -> vm.taskMatchesDate(task, LocalDate.of(year, month, day)) } }.toSet() } }
+    val taskDots by remember(regularTaskDots, assetPlanDots) { derivedStateOf { regularTaskDots + assetPlanDots } }
+    val postponedTaskDots by remember(year, month, regularTasks, tradingDaysReady) { derivedStateOf { emptySet<Int>() } }
+    val dayTasks by remember(year, month, selectedDay, regularTasks, tradingDaysReady) { derivedStateOf { vm.tasksForDate(year, month, selectedDay).filterNot { it.isInvest } } }
+    val dayAssetPlans by remember(selectedDate, runningAssetPlans, assetPlanLogsById) {
+        derivedStateOf {
+            runningAssetPlans.filter { plan ->
+                assetPlanLogsById[plan.id].orEmpty().any { log ->
+                    isCalendarAssetLog(log) && log.date == selectedDate.toString()
+                }
+            }
+        }
+    }
+    val sectionExpanded = remember {
+        mutableStateMapOf(
+            "day" to true,
+            "regular" to true,
+            "asset" to true
+        )
+    }
 
     LaunchedEffect(year) {
         if (!TradingDayService.isLoaded(year)) {
@@ -179,9 +233,23 @@ fun CalendarScreen(vm: MainViewModel) {
                         month = month,
                         selectedDay = selectedDay,
                         dayTasks = dayTasks,
-                        tasks = tasks,
+                        dayAssetPlans = dayAssetPlans,
+                        tasks = regularTasks,
                         vm = vm,
-                        onEdit = { editingTask = it }
+                        vaultCurrency = vaultCurrency,
+                        expanded = sectionExpanded,
+                        onEdit = { editingTask = it },
+                        onOpenAsset = { viewingAsset = it },
+                        onEditAsset = { editingAsset = it; showAssetEditor = true }
+                    )
+                    calendarAssetSections(
+                        assetPlans = runningAssetPlans,
+                        vm = vm,
+                        vaultCurrency = vaultCurrency,
+                        expanded = sectionExpanded["asset"] ?: true,
+                        onToggleExpanded = { sectionExpanded["asset"] = !(sectionExpanded["asset"] ?: true) },
+                        onOpen = { viewingAsset = it },
+                        onEdit = { editingAsset = it; showAssetEditor = true }
                     )
                 }
             }
@@ -227,32 +295,48 @@ fun CalendarScreen(vm: MainViewModel) {
                     month = month,
                     selectedDay = selectedDay,
                     dayTasks = dayTasks,
-                    tasks = tasks,
+                    dayAssetPlans = dayAssetPlans,
+                    tasks = regularTasks,
                     vm = vm,
-                    onEdit = { editingTask = it }
+                    vaultCurrency = vaultCurrency,
+                    expanded = sectionExpanded,
+                    onEdit = { editingTask = it },
+                    onOpenAsset = { viewingAsset = it },
+                    onEditAsset = { editingAsset = it; showAssetEditor = true }
+                )
+                calendarAssetSections(
+                    assetPlans = runningAssetPlans,
+                    vm = vm,
+                    vaultCurrency = vaultCurrency,
+                    expanded = sectionExpanded["asset"] ?: true,
+                    onToggleExpanded = { sectionExpanded["asset"] = !(sectionExpanded["asset"] ?: true) },
+                    onOpen = { viewingAsset = it },
+                    onEdit = { editingAsset = it; showAssetEditor = true }
                 )
                 bottomSpacer()
             }
         }
 
-        FloatingActionButton(
-            onClick = { showAddTask = true },
+        CreateFabMenu(
+            expanded = showCreateMenu,
+            onExpandedChange = { showCreateMenu = it },
+            contentDescription = newTask,
+            items = listOf(
+                CreateFabMenuItem("定期任务", Icons.Default.TaskAlt) { showAddTask = true },
+                CreateFabMenuItem("投资任务", Icons.Default.AccountBalance) { editingAsset = null; showAssetEditor = true }
+            ),
             modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
-            shape = RoundedCornerShape(16.dp),
-            containerColor = cs.primary
-        ) {
-            Icon(Icons.Default.Add, newTask, tint = Color.White)
-        }
+        )
     }
 
     if (showAddTask) {
-        TaskDialog(vm = vm, onDismiss = { showAddTask = false }) { t ->
+        TaskDialog(vm = vm, onDismiss = { showAddTask = false }, fullScreen = true) { t ->
             vm.addTask(
                 t.name,
                 t.freq,
                 t.cardId,
-                t.isInvest,
-                t.investAmount,
+                false,
+                0.0,
                 t.day,
                 t.weekday,
                 t.months,
@@ -272,15 +356,16 @@ fun CalendarScreen(vm: MainViewModel) {
             onDelete = {
                 deletingTask = task
                 editingTask = null
-            }
+            },
+            fullScreen = true,
         ) { t ->
             vm.updateTask(
                 task.copy(
                     name = t.name,
                     freq = t.freq,
                     cardId = t.cardId,
-                    isInvest = t.isInvest,
-                    investAmount = t.investAmount,
+                    isInvest = false,
+                    investAmount = 0.0,
                     day = t.day,
                     weekday = t.weekday,
                     months = t.months,
@@ -292,6 +377,37 @@ fun CalendarScreen(vm: MainViewModel) {
             )
             editingTask = null
         }
+    }
+
+    viewingAsset?.let { plan ->
+        AssetPlanDetailDialog(
+            plan = plan,
+            logs = vm.assetPlanLogs(plan),
+            amount = vm.assetPlanDisplayAmount(plan),
+            linkedCardName = vm.cardName(plan.cardId),
+            onDismiss = { viewingAsset = null },
+            onEdit = { editingAsset = plan; viewingAsset = null; showAssetEditor = true },
+            onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
+            fullScreen = true
+        )
+    }
+
+    if (showAssetEditor) {
+        AssetPlanEditorDialog(
+            initial = editingAsset,
+            cards = cards,
+            cardName = vm::cardName,
+            onDismiss = { showAssetEditor = false; editingAsset = null },
+            onSave = { plan ->
+                if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
+                showAssetEditor = false
+                editingAsset = null
+            },
+            onDelete = editingAsset?.let { plan ->
+                { vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
+            },
+            fullScreen = true
+        )
     }
 
     deletingTask?.let { task ->
@@ -371,55 +487,221 @@ private fun CalendarMonthPanel(
     }
 }
 
+@Composable
+private fun CollapsibleCalendarHeader(
+    title: String,
+    subtitle: String?,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    SectionHeader(
+        title = title,
+        subtitle = subtitle,
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onToggle() }
+            .padding(vertical = 2.dp),
+        trailing = {
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    )
+}
+
+@Composable
+private fun CollapsibleCalendarSubHeader(
+    title: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onToggle() }
+            .padding(horizontal = 2.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            title,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            stringResource(R.string.count_items, count),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Icon(
+            if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+            null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
 private fun LazyListScope.calendarTaskSections(
     month: Int,
     selectedDay: Int,
     dayTasks: List<Task>,
+    dayAssetPlans: List<AssetPlan>,
     tasks: List<Task>,
     vm: MainViewModel,
-    onEdit: (Task) -> Unit
+    vaultCurrency: String,
+    expanded: MutableMap<String, Boolean>,
+    onEdit: (Task) -> Unit,
+    onOpenAsset: (AssetPlan) -> Unit,
+    onEditAsset: (AssetPlan) -> Unit
 ) {
+    val dayCount = dayTasks.size + dayAssetPlans.size
     item {
-        SectionHeader(
-            stringResource(R.string.day_tasks, month, selectedDay),
-            subtitle = stringResource(R.string.count_items, dayTasks.size)
+        CollapsibleCalendarHeader(
+            title = stringResource(R.string.day_tasks, month, selectedDay),
+            subtitle = stringResource(R.string.count_items, dayCount),
+            expanded = expanded["day"] ?: true,
+            onToggle = { expanded["day"] = !(expanded["day"] ?: true) }
         )
     }
-    if (dayTasks.isEmpty()) {
-        item {
-            EmptyState(
-                Icons.Default.EventAvailable,
-                stringResource(R.string.no_tasks_today_title),
-                stringResource(R.string.no_tasks_today_body)
-            )
-        }
-    } else {
-        items(dayTasks, key = { "day_${it.id}" }) { task ->
-            TaskItem(task, vm.cardName(task.cardId)) { onEdit(task) }
+    if (expanded["day"] != false) {
+        if (dayTasks.isEmpty() && dayAssetPlans.isEmpty()) {
+            item {
+                EmptyState(
+                    Icons.Default.EventAvailable,
+                    stringResource(R.string.no_tasks_today_title),
+                    stringResource(R.string.no_tasks_today_body)
+                )
+            }
+        } else {
+            items(dayTasks, key = { "day_${it.id}" }) { task ->
+                TaskItem(task, vm.cardName(task.cardId)) { onEdit(task) }
+            }
+            items(dayAssetPlans, key = { "day_asset_${it.id}" }) { plan ->
+                val amount = vm.assetPlanDisplayAmount(plan)
+                AssetPlanRow(
+                    plan = plan,
+                    amount = amount,
+                    linkedCardName = vm.cardName(plan.cardId),
+                    convertedAmount = vm.convertMoney(amount, plan.currency, vaultCurrency),
+                    targetCurrency = vaultCurrency,
+                    onClick = { onOpenAsset(plan) },
+                    onEdit = { onEditAsset(plan) },
+                    onArchive = { vm.archiveAssetPlan(plan, plan.countInTotal) },
+                    onRestore = { vm.restoreAssetPlan(plan) },
+                    onDelete = { vm.deleteAssetPlan(plan) }
+                )
+            }
         }
     }
 
     item {
         Spacer(Modifier.height(4.dp))
-        SectionHeader(
-            stringResource(R.string.all_tasks),
-            subtitle = stringResource(R.string.count_items, tasks.size)
+        CollapsibleCalendarHeader(
+            title = "定期任务",
+            subtitle = stringResource(R.string.count_items, tasks.size),
+            expanded = expanded["regular"] ?: true,
+            onToggle = { expanded["regular"] = !(expanded["regular"] ?: true) }
         )
     }
-    if (tasks.isEmpty()) {
-        item {
-            EmptyState(
-                Icons.Default.TaskAlt,
-                stringResource(R.string.no_tasks_title),
-                stringResource(R.string.no_tasks_body)
-            )
-        }
-    } else {
-        items(tasks, key = { "all_${it.id}" }) { task ->
-            TaskItem(task, vm.cardName(task.cardId)) { onEdit(task) }
+    if (expanded["regular"] != false) {
+        if (tasks.isEmpty()) {
+            item {
+                EmptyState(
+                    Icons.Default.TaskAlt,
+                    stringResource(R.string.no_tasks_title),
+                    stringResource(R.string.no_tasks_body)
+                )
+            }
+        } else {
+            groupedRegularTasks(tasks).forEach { (label, groupTasks) ->
+                val key = "regular_group_$label"
+                item(key = "regular_label_$label") {
+                    CollapsibleCalendarSubHeader(
+                        title = label,
+                        count = groupTasks.size,
+                        expanded = expanded[key] ?: true,
+                        onToggle = { expanded[key] = !(expanded[key] ?: true) }
+                    )
+                }
+                if (expanded[key] != false) {
+                    items(groupTasks, key = { "regular_${it.id}" }) { task ->
+                        TaskItem(task, vm.cardName(task.cardId)) { onEdit(task) }
+                    }
+                }
+            }
         }
     }
 }
+
+private fun LazyListScope.calendarAssetSections(
+    assetPlans: List<AssetPlan>,
+    vm: MainViewModel,
+    vaultCurrency: String,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onOpen: (AssetPlan) -> Unit,
+    onEdit: (AssetPlan) -> Unit
+) {
+    item {
+        Spacer(Modifier.height(4.dp))
+        CollapsibleCalendarHeader(
+            title = "投资任务",
+            subtitle = "${assetPlans.size} 个运行",
+            expanded = expanded,
+            onToggle = onToggleExpanded
+        )
+    }
+    if (expanded) {
+        if (assetPlans.isEmpty()) {
+            item {
+                EmptyState(
+                    Icons.Default.AccountBalance,
+                    "还没有投资任务",
+                    "点右下角加号新增投资任务"
+                )
+            }
+        } else {
+            items(assetPlans, key = { "asset_${it.id}" }) { plan ->
+                val amount = vm.assetPlanDisplayAmount(plan)
+                AssetPlanRow(
+                    plan = plan,
+                    amount = amount,
+                    linkedCardName = vm.cardName(plan.cardId),
+                    convertedAmount = vm.convertMoney(amount, plan.currency, vaultCurrency),
+                    targetCurrency = vaultCurrency,
+                    onClick = { onOpen(plan) },
+                    onEdit = { onEdit(plan) },
+                    onArchive = { vm.archiveAssetPlan(plan, plan.countInTotal) },
+                    onRestore = { vm.restoreAssetPlan(plan) },
+                    onDelete = { vm.deleteAssetPlan(plan) }
+                )
+            }
+        }
+    }
+}
+
+private fun groupedRegularTasks(tasks: List<Task>): List<Pair<String, List<Task>>> {
+    val orderedGroups = listOf(
+        "每天" to tasks.filter { it.freq == "ndays" && it.ndays.coerceAtLeast(1) == 1 },
+        "每N天" to tasks.filter { it.freq == "ndays" && it.ndays.coerceAtLeast(1) > 1 },
+        "每周" to tasks.filter { it.freq == "weekly" },
+        "每月" to tasks.filter { it.freq == "monthly" },
+        "每季度" to tasks.filter { it.freq == "quarterly" },
+        "单次" to tasks.filter { it.freq == "once" }
+    )
+    return orderedGroups.filter { it.second.isNotEmpty() }
+}
+
+private fun isCalendarAssetLog(log: AssetTransactionLog): Boolean =
+    log.amount != 0.0 && log.type in setOf(AssetLogType.INITIAL, AssetLogType.PERIODIC, AssetLogType.POSTPONED, AssetLogType.ADJUSTMENT)
 
 @Composable
 private fun LegendDot(color: Color, label: String) {
@@ -611,24 +893,19 @@ fun TaskDialog(
     initial: Task? = null,
     onDismiss: () -> Unit,
     onDelete: (() -> Unit)? = null,
+    fullScreen: Boolean = false,
     onSave: (Task) -> Unit
 ) {
     val cards by vm.cards.collectAsState()
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var freq by remember { mutableStateOf(initial?.freq ?: "monthly") }
     var cardId by remember { mutableStateOf(initial?.cardId ?: "") }
-    var isInvest by remember { mutableStateOf(initial?.isInvest ?: false) }
-    val initialInvestAmount = kotlin.math.abs(initial?.investAmount ?: 0.0)
-    var investAmt by remember { mutableStateOf(if (initialInvestAmount != 0.0) initialInvestAmount.toString() else "") }
     var day by remember { mutableStateOf((initial?.day ?: 1).toString()) }
     var weekday by remember { mutableStateOf((initial?.weekday ?: 1).toString()) }
     var months by remember { mutableStateOf(initial?.months ?: "1,4,7,10") }
     var ndays by remember { mutableStateOf((initial?.ndays ?: 7).toString()) }
     var startDate by remember { mutableStateOf(initial?.startDate?.ifBlank { initial.date } ?: LocalDate.now().toString()) }
     var date by remember { mutableStateOf(initial?.date ?: LocalDate.now().toString()) }
-    var avoidNonTradingDays by remember {
-        mutableStateOf(initial?.let { !it.isInvest || TaskHolidayPolicy.avoidsNonTradingDays(it) } ?: true)
-    }
     LaunchedEffect(freq, startDate) {
         if (freq == "once") date = startDate
     }
@@ -651,15 +928,25 @@ fun TaskDialog(
     )
 
     val cs = MaterialTheme.colorScheme
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(20.dp), color = cs.surface, modifier = Modifier.responsiveDialogWidth(620.dp)) {
+    if (fullScreen) {
+        BackHandler { onDismiss() }
+    }
+    val content: @Composable () -> Unit = {
             Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    if (initial == null) stringResource(R.string.new_task) else stringResource(R.string.edit_task),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    color = cs.onSurface
-                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (fullScreen) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.ChevronLeft, null, tint = cs.onSurface)
+                        }
+                    }
+                    Text(
+                        if (initial == null) stringResource(R.string.new_task) else stringResource(R.string.edit_task),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = cs.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 OutlinedTextField(
                     value = name,
@@ -777,63 +1064,6 @@ fun TaskDialog(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = isInvest, onCheckedChange = { isInvest = it })
-                    Text(stringResource(R.string.invest_task), fontSize = 13.sp)
-                }
-                if (isInvest) {
-                    OutlinedTextField(
-                        value = investAmt,
-                        onValueChange = { raw ->
-                            var hasDot = false
-                            investAmt = buildString {
-                                raw.forEach { ch ->
-                                    when {
-                                        ch.isDigit() -> append(ch)
-                                        ch == '.' && !hasDot -> {
-                                            append(ch)
-                                            hasDot = true
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        label = { Text(stringResource(R.string.invest_amount_hint)) },
-                        placeholder = { Text(stringResource(R.string.invest_amount_placeholder)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(cs.surfaceVariant.copy(alpha = 0.32f))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                stringResource(R.string.avoid_non_trading_days),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = cs.onSurface
-                            )
-                            Text(
-                                stringResource(R.string.avoid_non_trading_days_summary),
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp,
-                                color = cs.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = avoidNonTradingDays,
-                            onCheckedChange = { avoidNonTradingDays = it }
-                        )
-                    }
-                }
-
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     onDelete?.let {
                         OutlinedButton(onClick = it, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) {
@@ -849,21 +1079,15 @@ fun TaskDialog(
                                         name = name.trim(),
                                         freq = freq,
                                         cardId = cardId,
-                                        isInvest = isInvest,
-                                        investAmount = (investAmt.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0),
+                                        isInvest = false,
+                                        investAmount = 0.0,
                                         day = day.toIntOrNull() ?: 1,
                                         weekday = weekday.toIntOrNull() ?: 1,
                                         months = months,
                                         ndays = (ndays.toIntOrNull() ?: 7).coerceAtLeast(1),
                                         startDate = startDate,
                                         date = date,
-                                        holidays = if (isInvest && avoidNonTradingDays) {
-                                            TaskHolidayPolicy.AVOID_NON_TRADING_DAYS
-                                        } else if (isInvest) {
-                                            TaskHolidayPolicy.ALLOW_NON_TRADING_DAYS
-                                        } else {
-                                            ""
-                                        }
+                                        holidays = ""
                                     )
                                 )
                             }
@@ -874,6 +1098,18 @@ fun TaskDialog(
                         Text(stringResource(R.string.save))
                     }
                 }
+            }
+    }
+    if (fullScreen) {
+        Box(Modifier.fillMaxSize().background(cs.background)) {
+            Surface(color = cs.surface, modifier = Modifier.fillMaxSize()) {
+                content()
+            }
+        }
+    } else {
+        Dialog(onDismissRequest = onDismiss) {
+            Surface(shape = RoundedCornerShape(20.dp), color = cs.surface, modifier = Modifier.responsiveDialogWidth(620.dp)) {
+                content()
             }
         }
     }
