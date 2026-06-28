@@ -100,6 +100,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val cardsPerRowPortrait by vm.cardsPerRowPortrait.collectAsState()
     val cardsPerRowLandscape by vm.cardsPerRowLandscape.collectAsState()
     val ungroupedMode by vm.ungroupedMode.collectAsState()
+    val cardViewMode by vm.cardViewMode.collectAsState()
     val tabOrder by vm.tabOrder.collectAsState()
     val visibleOptionalTabs by vm.visibleOptionalTabs.collectAsState()
     val preferHighRefreshRate by vm.preferHighRefreshRate.collectAsState()
@@ -330,6 +331,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 
             item {
                 SettingsSection(stringResource(R.string.card_layout)) {
+                    CardViewModeRow(cardViewMode = cardViewMode, onChange = vm::setCardViewMode)
                     CardsPerRowRow(
                         cardsPerRowPortrait = cardsPerRowPortrait,
                         cardsPerRowLandscape = cardsPerRowLandscape,
@@ -440,14 +442,18 @@ private fun DonationSupportBlock() {
             fontWeight = FontWeight.SemiBold,
             color = cs.onSurface
         )
-        DonationCodeImage(
-            title = stringResource(R.string.wechat_appreciation_code),
-            drawableRes = R.drawable.donation_wechat
-        )
-        DonationCodeImage(
-            title = stringResource(R.string.alipay_appreciation_code),
-            drawableRes = R.drawable.donation_alipay
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            DonationCodeImage(
+                title = stringResource(R.string.wechat_appreciation_code),
+                drawableRes = R.drawable.donation_wechat,
+                modifier = Modifier.weight(1f)
+            )
+            DonationCodeImage(
+                title = stringResource(R.string.alipay_appreciation_code),
+                drawableRes = R.drawable.donation_alipay,
+                modifier = Modifier.weight(1f)
+            )
+        }
         Text(
             stringResource(R.string.usdt_trc20_address),
             fontSize = 12.sp,
@@ -472,9 +478,9 @@ private fun DonationSupportBlock() {
 }
 
 @Composable
-private fun DonationCodeImage(title: String, drawableRes: Int) {
+private fun DonationCodeImage(title: String, drawableRes: Int, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
         Box(
             Modifier
@@ -490,7 +496,7 @@ private fun DonationCodeImage(title: String, drawableRes: Int) {
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(180.dp)
             )
         }
     }
@@ -576,6 +582,23 @@ private fun ThemeModeRow(themeMode: String, onChange: (String) -> Unit) {
         title = stringResource(R.string.dark_mode),
         subtitle = "",
         value = options.firstOrNull { it.first == themeMode }?.second ?: options.first().second,
+        options = options,
+        onChange = onChange
+    )
+}
+
+@Composable
+private fun CardViewModeRow(cardViewMode: String, onChange: (String) -> Unit) {
+    val options = listOf(
+        "wallet" to stringResource(R.string.card_view_wallet),
+        "gallery" to stringResource(R.string.card_view_gallery),
+        "list" to stringResource(R.string.card_view_list)
+    )
+    SettingDropdownRow(
+        icon = Icons.Default.CreditCard,
+        title = stringResource(R.string.card_view_mode),
+        subtitle = stringResource(R.string.card_view_mode_summary),
+        value = options.firstOrNull { it.first == cardViewMode }?.second ?: options.first().second,
         options = options,
         onChange = onChange
     )

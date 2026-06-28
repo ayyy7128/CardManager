@@ -63,6 +63,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val ungroupedMode: StateFlow<Boolean> = _ungroupedMode
     private val _cardGalleryMode = MutableStateFlow(prefs.getString("cardGalleryMode", "true").toBoolean())
     val cardGalleryMode: StateFlow<Boolean> = _cardGalleryMode
+    private val _cardViewMode = MutableStateFlow(sanitizeCardViewMode(prefs.getString("cardViewMode", "wallet") ?: "wallet"))
+    val cardViewMode: StateFlow<String> = _cardViewMode
     private val _tabOrder = MutableStateFlow(sanitizeTabOrder(prefs.getString("tabOrder", defaultTabOrder.joinToString(",")) ?: defaultTabOrder.joinToString(",")))
     val tabOrder: StateFlow<List<String>> = _tabOrder
     private val _visibleOptionalTabs = MutableStateFlow(sanitizeVisibleOptionalTabs(prefs.getString("visibleOptionalTabs", optionalTabIds.joinToString(",")) ?: optionalTabIds.joinToString(",")))
@@ -98,7 +100,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val landscapeRows = repo.getSetting("cardsPerRowLandscape", prefs.getString("cardsPerRowLandscape", "3") ?: "3")
                 .toIntOrNull()?.coerceIn(1, 6) ?: 3
             val ungrouped = repo.getSetting("ungroupedMode", prefs.getString("ungroupedMode", "false") ?: "false").toBoolean()
-            val cardGalleryMode = repo.getSetting("cardGalleryMode", prefs.getString("cardGalleryMode", "true") ?: "true").toBoolean()
+            val legacyCardGalleryRaw = repo.getSetting("cardGalleryMode", prefs.getString("cardGalleryMode", "") ?: "")
+            val cardGalleryMode = legacyCardGalleryRaw.ifBlank { "true" }.toBoolean()
+            val savedCardViewMode = repo.getSetting("cardViewMode", prefs.getString("cardViewMode", "") ?: "")
+            val cardViewMode = if (savedCardViewMode.isBlank()) {
+                if (legacyCardGalleryRaw.isBlank()) "wallet" else if (cardGalleryMode) "gallery" else "list"
+            } else {
+                sanitizeCardViewMode(savedCardViewMode)
+            }
             val tabOrder = sanitizeTabOrder(repo.getSetting("tabOrder", prefs.getString("tabOrder", defaultTabOrder.joinToString(",")) ?: defaultTabOrder.joinToString(",")))
             val visibleOptionalTabs = sanitizeVisibleOptionalTabs(repo.getSetting("visibleOptionalTabs", prefs.getString("visibleOptionalTabs", optionalTabIds.joinToString(",")) ?: optionalTabIds.joinToString(",")))
             val visibleDataCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", prefs.getString("visibleDataCharts", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
@@ -112,6 +121,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("cardsPerRowLandscape", landscapeRows.toString())
                 .putString("ungroupedMode", ungrouped.toString())
                 .putString("cardGalleryMode", cardGalleryMode.toString())
+                .putString("cardViewMode", cardViewMode)
                 .putString("tabOrder", tabOrder.joinToString(","))
                 .putString("visibleOptionalTabs", visibleOptionalTabs.joinToString(","))
                 .putString("visibleDataCharts", visibleDataCharts.joinToString(","))
@@ -125,6 +135,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _cardsPerRowLandscape.value = landscapeRows
             _ungroupedMode.value = ungrouped
             _cardGalleryMode.value = cardGalleryMode
+            _cardViewMode.value = cardViewMode
             _tabOrder.value = tabOrder
             _visibleOptionalTabs.value = visibleOptionalTabs
             _visibleDataCharts.value = visibleDataCharts
@@ -262,9 +273,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setCardGalleryMode(value: Boolean) {
         viewModelScope.launch {
+            val mode = if (value) "gallery" else "list"
             _cardGalleryMode.value = value
-            prefs.edit().putString("cardGalleryMode", value.toString()).apply()
+            _cardViewMode.value = mode
+            prefs.edit()
+                .putString("cardGalleryMode", value.toString())
+                .putString("cardViewMode", mode)
+                .apply()
             repo.setSetting("cardGalleryMode", value.toString())
+            repo.setSetting("cardViewMode", mode)
+        }
+    }
+
+    fun setCardViewMode(value: String) {
+        viewModelScope.launch {
+            val mode = sanitizeCardViewMode(value)
+            val galleryMode = mode == "gallery"
+            _cardViewMode.value = mode
+            _cardGalleryMode.value = galleryMode
+            prefs.edit()
+                .putString("cardViewMode", mode)
+                .putString("cardGalleryMode", galleryMode.toString())
+                .apply()
+            repo.setSetting("cardViewMode", mode)
+            repo.setSetting("cardGalleryMode", galleryMode.toString())
         }
     }
 
@@ -308,6 +340,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val parsed = raw.split(",").map { it.trim() }.filter { it in defaultTabOrder }.distinct()
         return (parsed + defaultTabOrder.filter { it !in parsed }).distinct()
     }
+
+    private fun sanitizeCardViewMode(raw: String): String =
+        when (raw) {
+            "wallet", "gallery", "list" -> raw
+            else -> "wallet"
+        }
 
     private fun sanitizeVisibleOptionalTabs(raw: String): Set<String> =
         raw.split(",").map { it.trim() }.filter { it in optionalTabIds }.toSet()
@@ -456,12 +494,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 note: String, status: String, isVirtual: Boolean, noCard: Boolean,
                 logoEmoji: String = "", logoImagePath: String = "", bankLogoPath: String = "",
                 cardTypeName: String = "", expiryDate: String = "", cardCategory: String = "",
-                imageOrientation: String = "horizontal") {
+                imageOrientation: String = "horizontal", creditLimit: Double = 0.0, billingDay: Int = 0) {
         viewModelScope.launch {
             val order = cards.value.count { it.groupId == groupId }
             repo.saveCard(Card(UUID.randomUUID().toString(), groupId, bank, network, currency,
                 tail, "", note, status, isVirtual, noCard, logoEmoji, logoImagePath,
-                bankLogoPath, cardTypeName, expiryDate, cardCategory, order, imageOrientation))
+                bankLogoPath, cardTypeName, expiryDate, cardCategory, order, imageOrientation,
+                creditLimit.coerceAtLeast(0.0), billingDay.takeIf { it in 1..31 } ?: 0))
         }
     }
     fun updateCard(c: Card) {
@@ -824,7 +863,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val landscapeRows = repo.getSetting("cardsPerRowLandscape", _cardsPerRowLandscape.value.toString())
             .toIntOrNull()?.coerceIn(1, 6) ?: 3
         val ungrouped = repo.getSetting("ungroupedMode", _ungroupedMode.value.toString()).toBoolean()
-        val cardGalleryMode = repo.getSetting("cardGalleryMode", _cardGalleryMode.value.toString()).toBoolean()
+        val importedCardGalleryRaw = repo.getSetting("cardGalleryMode", _cardGalleryMode.value.toString())
+        val cardGalleryMode = importedCardGalleryRaw.toBoolean()
+        val importedCardViewRaw = repo.getSetting("cardViewMode", "")
+        val cardViewMode = if (importedCardViewRaw.isBlank()) {
+            if (cardGalleryMode) "gallery" else "list"
+        } else {
+            sanitizeCardViewMode(importedCardViewRaw)
+        }
         val tabOrder = sanitizeTabOrder(repo.getSetting("tabOrder", _tabOrder.value.joinToString(",")))
         val visibleTabs = sanitizeVisibleOptionalTabs(repo.getSetting("visibleOptionalTabs", _visibleOptionalTabs.value.joinToString(",")))
         val visibleCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", _visibleDataCharts.value.joinToString(",")))
@@ -850,6 +896,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _cardsPerRowLandscape.value = landscapeRows
         _ungroupedMode.value = ungrouped
         _cardGalleryMode.value = cardGalleryMode
+        _cardViewMode.value = cardViewMode
         _tabOrder.value = tabOrder
         _visibleOptionalTabs.value = visibleTabs
         _visibleDataCharts.value = visibleCharts
@@ -866,6 +913,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .putString("cardsPerRowLandscape", landscapeRows.toString())
             .putString("ungroupedMode", ungrouped.toString())
             .putString("cardGalleryMode", cardGalleryMode.toString())
+            .putString("cardViewMode", cardViewMode)
             .putString("tabOrder", tabOrder.joinToString(","))
             .putString("visibleOptionalTabs", visibleTabs.joinToString(","))
             .putString("visibleDataCharts", visibleCharts.joinToString(","))

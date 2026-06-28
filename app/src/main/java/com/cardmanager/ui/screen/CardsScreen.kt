@@ -4,16 +4,24 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.nfc.NfcAdapter
 import android.nfc.tech.IsoDep
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -21,6 +29,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,22 +49,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.cardmanager.R
+import com.cardmanager.data.AssetPlan
 import com.cardmanager.data.Card
 import com.cardmanager.data.CardGroup
 import com.cardmanager.data.ImageStore
+import com.cardmanager.data.PiggyEntry
+import com.cardmanager.data.Task
 import com.cardmanager.nfc.EmvCardReader
 import com.cardmanager.nfc.EmvProbeResult
 import com.cardmanager.ui.components.EmptyState
@@ -67,6 +83,7 @@ import com.cardmanager.ui.theme.*
 import com.cardmanager.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.DecimalFormat
 
 // ── 异步加载图片 ──────────────────────────────────────────
 @Composable
@@ -83,11 +100,28 @@ fun rememberBitmap(path: String, refreshKey: Int, maxDimension: Int = 0): Bitmap
     return bmp
 }
 
+@Composable
+private fun rememberDisplayBitmap(source: Bitmap?, rotateLandscape: Boolean): Bitmap? =
+    remember(source, rotateLandscape) {
+        if (source == null || !rotateLandscape) {
+            source
+        } else {
+            val matrix = Matrix().apply { postRotate(-90f) }
+            Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        }
+    }
+
 private data class CardSection(
     val group: CardGroup,
     val cards: List<Card>,
     val isVirtual: Boolean = false
 )
+
+private sealed class CardOverlay {
+    data class Add(val groupId: String) : CardOverlay()
+    data class Edit(val card: Card) : CardOverlay()
+    data class Focus(val card: Card) : CardOverlay()
+}
 
 @Composable
 fun CardsScreen(vm: MainViewModel) {
@@ -97,17 +131,26 @@ fun CardsScreen(vm: MainViewModel) {
     val cardsPerRowPortrait by vm.cardsPerRowPortrait.collectAsState()
     val cardsPerRowLandscape by vm.cardsPerRowLandscape.collectAsState()
     val ungroupedMode by vm.ungroupedMode.collectAsState()
-    val galleryMode by vm.cardGalleryMode.collectAsState()
+    val cardViewMode by vm.cardViewMode.collectAsState()
+    val tasks by vm.tasks.collectAsState()
+    val piggyEntries by vm.piggyEntries.collectAsState()
+    val assetPlans by vm.assetPlans.collectAsState()
+    val walletMode = cardViewMode == "wallet"
+    val galleryMode = cardViewMode == "gallery"
+    val listMode = cardViewMode == "list"
 
     var showAddGroup  by remember { mutableStateOf(false) }
     var editingGroup  by remember { mutableStateOf<CardGroup?>(null) }
     var showAddCard   by remember { mutableStateOf<String?>(null) }
     var editingCard   by remember { mutableStateOf<Card?>(null) }
+    var focusedCardId by remember { mutableStateOf<String?>(null) }
+    var expandedWalletStacks by remember { mutableStateOf(emptySet<String>()) }
     var deletingGroup by remember { mutableStateOf<CardGroup?>(null) }
     var deletingCard  by remember { mutableStateOf<Card?>(null) }
     var showCreateMenu by remember { mutableStateOf(false) }
     var showFilter    by remember { mutableStateOf(false) }
     var searchQuery   by remember { mutableStateOf("") }
+    var showSearch    by remember { mutableStateOf(false) }
 
     var filterNetworks by remember { mutableStateOf(emptySet<String>()) }
     var filterCurrency by remember { mutableStateOf("") }
@@ -145,6 +188,9 @@ fun CardsScreen(vm: MainViewModel) {
     val cs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     val hasSearch = searchQuery.trim().isNotEmpty()
+    LaunchedEffect(showSearch) {
+        if (!showSearch) searchQuery = ""
+    }
     val accountLabel = stringResource(R.string.account)
     val normalLabel = stringResource(R.string.normal)
     val frozenLabel = stringResource(R.string.frozen)
@@ -178,6 +224,11 @@ fun CardsScreen(vm: MainViewModel) {
     }
         .filter { cardMatches(it) }
         .distinctBy { it.id }
+    val focusedCard = focusedCardId?.let { id -> cards.firstOrNull { it.id == id } }
+
+    LaunchedEffect(focusedCardId, cards) {
+        if (focusedCardId != null && focusedCard == null) focusedCardId = null
+    }
 
     LaunchedEffect(cards, imageVersion) {
         val paths = cards
@@ -190,6 +241,19 @@ fun CardsScreen(vm: MainViewModel) {
         }
     }
 
+    val activeOverlay = when {
+        showAddCard != null -> CardOverlay.Add(showAddCard.orEmpty())
+        editingCard != null -> CardOverlay.Edit(editingCard!!)
+        focusedCard != null -> CardOverlay.Focus(focusedCard)
+        else -> null
+    }
+
+    fun dismissActiveOverlay() {
+        showAddCard = null
+        editingCard = null
+        focusedCardId = null
+    }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val pagePadding = screenPaddingFor(maxWidth)
         val galleryColumnCount = if (maxWidth > maxHeight) cardsPerRowLandscape else cardsPerRowPortrait
@@ -199,6 +263,17 @@ fun CardsScreen(vm: MainViewModel) {
             // ── 工具栏：筛选按钮 + 视图切换 ─────────────
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AnimatedVisibility(
+                        visible = showSearch,
+                        enter = slideInVertically(
+                            animationSpec = tween(durationMillis = 180),
+                            initialOffsetY = { -it / 3 }
+                        ) + fadeIn(animationSpec = tween(durationMillis = 140)),
+                        exit = slideOutVertically(
+                            animationSpec = tween(durationMillis = 150),
+                            targetOffsetY = { -it / 3 }
+                        ) + fadeOut(animationSpec = tween(durationMillis = 120))
+                    ) {
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
@@ -230,6 +305,7 @@ fun CardsScreen(vm: MainViewModel) {
                                 unfocusedBorderColor = Color.Transparent
                             )
                         )
+                    }
 
                         Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -280,12 +356,38 @@ fun CardsScreen(vm: MainViewModel) {
                         }
                     }
 
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (showSearch || hasSearch) cs.primary.copy(.14f) else cs.surfaceVariant,
+                        modifier = Modifier.clickable { showSearch = !showSearch }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                if (showSearch || hasSearch) Icons.Default.Close else Icons.Default.Search,
+                                null,
+                                tint = if (showSearch || hasSearch) cs.primary else cs.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                stringResource(R.string.search),
+                                fontSize = 12.sp,
+                                color = if (showSearch || hasSearch) cs.primary else cs.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
                     Spacer(Modifier.weight(1f))
 
                     // 视图切换
                     Row(Modifier.clip(RoundedCornerShape(8.dp)).background(cs.surfaceVariant)) {
-                        ViewToggleBtn(Icons.Default.GridView, galleryMode) { vm.setCardGalleryMode(true) }
-                        ViewToggleBtn(Icons.Default.ViewList, !galleryMode) { vm.setCardGalleryMode(false) }
+                        ViewToggleBtn(Icons.Default.CreditCard, walletMode) { vm.setCardViewMode("wallet") }
+                        ViewToggleBtn(Icons.Default.GridView, galleryMode) { vm.setCardViewMode("gallery") }
+                        ViewToggleBtn(Icons.Default.ViewList, listMode) { vm.setCardViewMode("list") }
                     }
                         }
                     }
@@ -293,14 +395,31 @@ fun CardsScreen(vm: MainViewModel) {
 
             // ── 分组 + 卡片 ──────────────────────────────
             if (ungroupedMode) {
-                if (galleryMode) {
+                if (walletMode) {
+                    item(key = "flat_wallet") {
+                        val stackKey = "flat"
+                        CardWalletStack(
+                            cards = flatCards,
+                            expanded = true,
+                            imageVersion = imageVersion,
+                            onToggle = {
+                                expandedWalletStacks = if (stackKey in expandedWalletStacks) {
+                                    expandedWalletStacks - stackKey
+                                } else {
+                                    expandedWalletStacks + stackKey
+                                }
+                            },
+                            onOpenCard = { focusedCardId = it.id }
+                        )
+                    }
+                } else if (galleryMode) {
                     items(flatCards.chunked(galleryColumnCount),
                         key = { chunk -> "flat_gal_" + chunk.joinToString { it.id } }) { row ->
                         Row(Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             row.forEach { card ->
                                 CardGalleryItem(card,
-                                    onEdit = { editingCard = card },
+                                    onEdit = { focusedCardId = card.id },
                                     onBankLogoPick = { vm.saveBankLogo(card, it) },
                                     imageVersion = imageVersion,
                                     modifier = Modifier.weight(1f),
@@ -312,7 +431,7 @@ fun CardsScreen(vm: MainViewModel) {
                 } else {
                     items(flatCards, key = { "flat_lst_${it.id}" }) { card ->
                         CardListItem(card,
-                            onEdit = { editingCard = card },
+                            onEdit = { focusedCardId = card.id },
                             onMoveUp = { vm.moveCardUp(card) },
                             onMoveDown = { vm.moveCardDown(card) },
                             imageVersion = imageVersion)
@@ -371,14 +490,31 @@ fun CardsScreen(vm: MainViewModel) {
                     }
 
                     if ((group.isOpen || section.isVirtual) && groupCards.isNotEmpty()) {
-                        if (galleryMode) {
+                        if (walletMode) {
+                            item(key = "wallet_${group.id.ifBlank { "ungrouped" }}") {
+                                val stackKey = group.id.ifBlank { "ungrouped" }
+                                CardWalletStack(
+                                    cards = groupCards,
+                                    expanded = section.isVirtual || stackKey in expandedWalletStacks,
+                                    imageVersion = imageVersion,
+                                    onToggle = {
+                                        expandedWalletStacks = if (stackKey in expandedWalletStacks) {
+                                            expandedWalletStacks - stackKey
+                                        } else {
+                                            expandedWalletStacks + stackKey
+                                        }
+                                    },
+                                    onOpenCard = { focusedCardId = it.id }
+                                )
+                            }
+                        } else if (galleryMode) {
                             items(groupCards.chunked(galleryColumnCount),
                                 key = { chunk -> "gal_" + chunk.joinToString { it.id } }) { row ->
                                 Row(Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     row.forEach { card ->
                                         CardGalleryItem(card,
-                                            onEdit = { editingCard = card },
+                                            onEdit = { focusedCardId = card.id },
                                             onBankLogoPick = { vm.saveBankLogo(card, it) },
                                             imageVersion = imageVersion,
                                             modifier = Modifier.weight(1f),
@@ -390,7 +526,7 @@ fun CardsScreen(vm: MainViewModel) {
                         } else {
                             items(groupCards, key = { "lst_${it.id}" }) { card ->
                                 CardListItem(card,
-                                    onEdit = { editingCard = card },
+                                    onEdit = { focusedCardId = card.id },
                                     onMoveUp = { vm.moveCardUp(card) },
                                     onMoveDown = { vm.moveCardDown(card) },
                                     imageVersion = imageVersion)
@@ -490,30 +626,6 @@ fun CardsScreen(vm: MainViewModel) {
             onDelete = { deletingGroup = g; editingGroup = null }) { n, ic ->
             vm.updateGroup(g.copy(name = n, icon = ic)); editingGroup = null }
     }
-    showAddCard?.let { gid ->
-        CardDialog(groups = groups, selectedGroupId = gid, bankPresets = cards.toBankPresets(), onDismiss = { showAddCard = null }) { d ->
-            vm.addCard(d.groupId, d.bank, d.network, d.currency, d.tail, d.note,
-                d.status, d.isVirtual, d.noCard, "", d.logoImagePath, d.bankLogoPath,
-                d.cardTypeName, d.expiryDate, d.cardCategory, d.imageOrientation)
-            showAddCard = null
-        }
-    }
-    editingCard?.let { card ->
-        CardDialog(initial = card, groups = groups, bankPresets = cards.filter { it.id != card.id }.toBankPresets(),
-            onDismiss = { editingCard = null },
-            onDelete = { deletingCard = card; editingCard = null }) { d ->
-            val movedToNewGroup = d.groupId != card.groupId
-            val nextOrder = if (movedToNewGroup) cards.count { it.groupId == d.groupId } else card.sortOrder
-            vm.updateCard(card.copy(groupId = d.groupId, bank = d.bank, network = d.network, currency = d.currency,
-                tail = d.tail, note = d.note, status = d.status,
-                isVirtual = d.isVirtual, noCard = d.noCard, logoImagePath = d.logoImagePath,
-                bankLogoPath = d.bankLogoPath, cardTypeName = d.cardTypeName,
-                expiryDate = d.expiryDate, cardCategory = d.cardCategory,
-                sortOrder = nextOrder, imageOrientation = d.imageOrientation))
-            editingCard = null
-        }
-    }
-
     deletingGroup?.let { group ->
         AlertDialog(
             onDismissRequest = { deletingGroup = null },
@@ -542,6 +654,74 @@ fun CardsScreen(vm: MainViewModel) {
             },
             dismissButton = { TextButton(onClick = { deletingCard = null }) { Text(stringResource(R.string.cancel)) } }
         )
+    }
+
+    activeOverlay?.let { overlayState ->
+        Dialog(
+            onDismissRequest = { dismissActiveOverlay() },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            AnimatedContent(
+                targetState = overlayState,
+                modifier = Modifier.fillMaxSize(),
+                label = "card_overlay_transition",
+                transitionSpec = {
+                    val duration = 260
+                    (slideInHorizontally(tween(duration)) { it } + fadeIn(tween(duration))) togetherWith
+                        (slideOutHorizontally(tween(duration)) { -it / 4 } + fadeOut(tween(duration)))
+                }
+            ) { overlay ->
+                when (overlay) {
+                    is CardOverlay.Add -> CardDialog(
+                        groups = groups,
+                        selectedGroupId = overlay.groupId,
+                        bankPresets = cards.toBankPresets(),
+                        onDismiss = { showAddCard = null },
+                        asPage = true
+                    ) { d ->
+                        vm.addCard(d.groupId, d.bank, d.network, d.currency, d.tail, d.note,
+                            d.status, d.isVirtual, d.noCard, "", d.logoImagePath, d.bankLogoPath,
+                            d.cardTypeName, d.expiryDate, d.cardCategory, d.imageOrientation,
+                            d.creditLimit, d.billingDay)
+                        showAddCard = null
+                    }
+
+                    is CardOverlay.Edit -> {
+                        val card = overlay.card
+                        CardDialog(
+                            initial = card,
+                            groups = groups,
+                            bankPresets = cards.filter { it.id != card.id }.toBankPresets(),
+                            onDismiss = { editingCard = null },
+                            onDelete = { deletingCard = card; editingCard = null; focusedCardId = null },
+                            asPage = true
+                        ) { d ->
+                            val movedToNewGroup = d.groupId != card.groupId
+                            val nextOrder = if (movedToNewGroup) cards.count { it.groupId == d.groupId } else card.sortOrder
+                            vm.updateCard(card.copy(groupId = d.groupId, bank = d.bank, network = d.network, currency = d.currency,
+                                tail = d.tail, note = d.note, status = d.status,
+                                isVirtual = d.isVirtual, noCard = d.noCard, logoImagePath = d.logoImagePath,
+                                bankLogoPath = d.bankLogoPath, cardTypeName = d.cardTypeName,
+                                expiryDate = d.expiryDate, cardCategory = d.cardCategory,
+                                sortOrder = nextOrder, imageOrientation = d.imageOrientation,
+                                creditLimit = d.creditLimit, billingDay = d.billingDay))
+                            editingCard = null
+                        }
+                    }
+
+                    is CardOverlay.Focus -> CardFocusPage(
+                        card = overlay.card,
+                        groups = groups,
+                        tasks = tasks,
+                        piggyEntries = piggyEntries,
+                        assetPlans = assetPlans,
+                        imageVersion = imageVersion,
+                        onBack = { focusedCardId = null },
+                        onEdit = { editingCard = overlay.card }
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -595,6 +775,314 @@ private fun CreateMenuAction(
 // ══════════════════════════════════════════════════════════
 // 筛选弹窗
 // ══════════════════════════════════════════════════════════
+@Composable
+private fun CardWalletStack(
+    cards: List<Card>,
+    expanded: Boolean,
+    imageVersion: Int,
+    onToggle: () -> Unit,
+    onOpenCard: (Card) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    if (cards.isEmpty()) {
+        Surface(shape = ItemShape, color = cs.surface, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                stringResource(R.string.card_wallet_empty),
+                fontSize = 13.sp,
+                color = cs.onSurfaceVariant,
+                modifier = Modifier.padding(18.dp)
+            )
+        }
+        return
+    }
+    val visibleCards = if (expanded) cards else cards.take(4)
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = tween(durationMillis = 230))
+            .clip(ItemShape)
+            .background(cs.background)
+            .clickable(enabled = !expanded) { onToggle() }
+    ) {
+        val faceHeight = (maxWidth / 1.586f).coerceIn(154.dp, 222.dp)
+        val targetStep = if (expanded) 86.dp else 22.dp
+        val step by animateDpAsState(
+            targetValue = targetStep,
+            animationSpec = tween(durationMillis = 230),
+            label = "walletStackStep"
+        )
+        val stackHeight = faceHeight + step * (visibleCards.size - 1).coerceAtLeast(0).toFloat()
+        Box(Modifier.fillMaxWidth().height(stackHeight)) {
+            visibleCards.forEachIndexed { index, card ->
+                WalletCardFace(
+                    card = card,
+                    imageVersion = imageVersion,
+                    showDetails = false,
+                    forceLandscapeCrop = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(faceHeight)
+                        .offset(y = step * index.toFloat())
+                        .zIndex(index.toFloat())
+                        .clickable {
+                            if (expanded) onOpenCard(card) else onToggle()
+                        }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalletCardFace(
+    card: Card,
+    imageVersion: Int,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    showDetails: Boolean = true,
+    forceLandscapeCrop: Boolean = false
+) {
+    val cs = MaterialTheme.colorScheme
+    val nc = networkColor(card.network)
+    val sourceCardBmp = rememberBitmap(card.logoImagePath, imageVersion, 720)
+    val cardBmp = rememberDisplayBitmap(
+        source = sourceCardBmp,
+        rotateLandscape = forceLandscapeCrop && card.imageOrientation == "vertical"
+    )
+    val bankBmp = rememberBitmap(card.bankLogoPath, imageVersion, 160)
+    val isDimmed = card.status == "cancelled" || card.status == "frozen"
+    val statusLabel = when (card.status) {
+        "frozen" -> stringResource(R.string.frozen)
+        "pending" -> stringResource(R.string.pending)
+        "cancelled" -> stringResource(R.string.cancelled)
+        else -> ""
+    }
+    val displayName = card.cardTypeName.ifBlank { card.bank }
+    val summary = cardSummaryText(card)
+    val showOverlayDetails = showDetails || cardBmp == null
+    val renderAsVertical = !forceLandscapeCrop && card.imageOrientation == "vertical"
+
+    Box(
+        modifier
+            .clip(RoundedCornerShape(if (compact) 14.dp else 18.dp))
+            .background(Brush.linearGradient(listOf(nc.bg, nc.bg.copy(alpha = 0.72f))))
+            .border(
+                1.4.dp,
+                if (MaterialTheme.colorScheme.background.luminance() > 0.5f) {
+                    Color.Black.copy(alpha = 0.28f)
+                } else {
+                    Color.White.copy(alpha = 0.34f)
+                },
+                RoundedCornerShape(if (compact) 14.dp else 18.dp)
+            )
+    ) {
+        if (cardBmp != null) {
+            Image(
+                cardBmp.asImageBitmap(),
+                null,
+                Modifier.fillMaxSize(),
+                contentScale = if (renderAsVertical) ContentScale.Fit else ContentScale.Crop,
+                filterQuality = FilterQuality.Medium,
+                alpha = if (isDimmed) 0.52f else 1f
+            )
+        }
+        if (showOverlayDetails) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.20f), Color.Black.copy(alpha = 0.04f), Color.Black.copy(alpha = 0.28f))
+                        )
+                    )
+            )
+        }
+        if (showOverlayDetails) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(if (compact) 14.dp else 18.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (bankBmp != null) {
+                        Image(
+                            bankBmp.asImageBitmap(),
+                            null,
+                            Modifier.size(if (compact) 28.dp else 34.dp).clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit,
+                            filterQuality = FilterQuality.Medium
+                        )
+                    } else {
+                        Box(
+                            Modifier
+                                .size(if (compact) 28.dp else 34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.AccountBalance, null, tint = nc.text, modifier = Modifier.size(if (compact) 16.dp else 19.dp))
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(card.bank, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold,
+                            color = nc.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(displayName, fontSize = if (compact) 10.sp else 12.sp, color = nc.text.copy(alpha = 0.78f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (statusLabel.isNotEmpty()) {
+                        SmallTag(statusLabel, Color.Black.copy(alpha = 0.34f), Color.White, compact = true)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        if (card.tail.isNotBlank()) {
+                            Text("**** ${card.tail}", fontSize = if (compact) 17.sp else 21.sp,
+                                fontWeight = FontWeight.SemiBold, color = nc.text, letterSpacing = 0.sp)
+                        }
+                        if (summary.isNotBlank()) {
+                            Text(summary, fontSize = if (compact) 10.sp else 12.sp, color = nc.text.copy(alpha = 0.72f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Text(card.currency, fontSize = if (compact) 12.sp else 14.sp,
+                        fontWeight = FontWeight.Bold, color = nc.text.copy(alpha = 0.82f))
+                }
+            }
+        }
+        if (showOverlayDetails && card.isVirtual) {
+            Box(Modifier.align(Alignment.TopEnd).padding(12.dp)) {
+                SmallTag(stringResource(R.string.virtual_card), cs.primary.copy(alpha = 0.82f), cs.onPrimary, compact = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardFocusPage(
+    card: Card,
+    groups: List<CardGroup>,
+    tasks: List<Task>,
+    piggyEntries: List<PiggyEntry>,
+    assetPlans: List<AssetPlan>,
+    imageVersion: Int,
+    onBack: () -> Unit,
+    onEdit: () -> Unit
+) {
+    BackHandler(onBack = onBack)
+    val cs = MaterialTheme.colorScheme
+    val groupName = groups.firstOrNull { it.id == card.groupId }?.name ?: stringResource(R.string.ungrouped_cards)
+    val relatedTasks = tasks.filter { it.cardId == card.id }
+    val relatedPiggy = piggyEntries.filter { it.cardId == card.id }.sortedByDescending { it.timestamp }
+    val relatedPlans = assetPlans.filter { it.cardId == card.id }.sortedBy { it.orderIndex }
+    val bankBmp = rememberBitmap(card.bankLogoPath, imageVersion, 160)
+    val statusLabel = when (card.status) {
+        "frozen" -> stringResource(R.string.frozen)
+        "pending" -> stringResource(R.string.pending)
+        "cancelled" -> stringResource(R.string.cancelled)
+        else -> stringResource(R.string.normal)
+    }
+    val networkDisplayName = when (card.network) {
+        "閾惰仈" -> stringResource(R.string.network_unionpay)
+        "鍏朵粬" -> stringResource(R.string.network_other)
+        else -> card.network
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(cs.background)) {
+        val pagePadding = screenPaddingFor(maxWidth)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
+            contentPadding = pagePadding,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.ArrowBack, stringResource(R.string.close), tint = cs.onBackground)
+                    }
+                    if (bankBmp != null) {
+                        Image(
+                            bankBmp.asImageBitmap(),
+                            null,
+                            Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Fit,
+                            filterQuality = FilterQuality.Medium
+                        )
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(card.bank, fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                            color = cs.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(card.cardTypeName.ifBlank { card.cardCategory.ifBlank { card.currency } },
+                            fontSize = 13.sp, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = onEdit, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Edit, stringResource(R.string.edit_card), tint = cs.primary)
+                    }
+                }
+            }
+            item {
+                WalletCardFace(
+                    card = card,
+                    imageVersion = imageVersion,
+                    showDetails = false,
+                    forceLandscapeCrop = true,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1.586f)
+                )
+            }
+            item {
+                FocusSection(title = stringResource(R.string.card_focus_details)) {
+                    FocusInfoRow(stringResource(R.string.card_group), groupName)
+                    FocusInfoRow(stringResource(R.string.status), statusLabel)
+                    if (!card.noCard) FocusInfoRow(stringResource(R.string.network), networkDisplayName)
+                    FocusInfoRow(stringResource(R.string.currency), card.currency)
+                    if (card.tail.isNotBlank()) FocusInfoRow(stringResource(R.string.tail_number), card.tail)
+                    if (card.cardCategory.isNotBlank()) FocusInfoRow(stringResource(R.string.card_category), card.cardCategory)
+                    if (card.expiryDate.isNotBlank()) FocusInfoRow(stringResource(R.string.expiry_optional), card.expiryDate)
+                    if (card.creditLimit > 0.0) FocusInfoRow(stringResource(R.string.credit_limit), "${card.currency} ${formatCreditAmount(card.creditLimit)}")
+                    if (card.billingDay in 1..31) FocusInfoRow(stringResource(R.string.billing_day), stringResource(R.string.billing_day_format, card.billingDay))
+                    if (card.note.isNotBlank()) FocusInfoRow(stringResource(R.string.note_optional), card.note)
+                }
+            }
+            item {
+                FocusSection(title = stringResource(R.string.card_related_items)) {
+                    FocusInfoRow(stringResource(R.string.card_related_tasks), relatedTasks.take(3).joinToString { it.name }.ifBlank { "0" })
+                    FocusInfoRow(stringResource(R.string.card_related_piggy), relatedPiggy.take(3).joinToString { "${it.date} ${formatCreditAmount(it.amount)}" }.ifBlank { "0" })
+                    FocusInfoRow(stringResource(R.string.card_related_assets), relatedPlans.take(3).joinToString { it.name.ifBlank { it.platform } }.ifBlank { "0" })
+                }
+            }
+            bottomSpacer()
+        }
+    }
+}
+
+@Composable
+private fun FocusSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = ItemShape, color = cs.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurfaceVariant)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun FocusInfoRow(label: String, value: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(label, fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.width(86.dp))
+        Text(value, fontSize = 13.sp, color = cs.onSurface, modifier = Modifier.weight(1f))
+    }
+}
+
+private fun cardSummaryText(card: Card): String =
+    listOfNotNull(
+        card.cardCategory.takeIf { it.isNotBlank() && !card.noCard },
+        card.expiryDate.takeIf { it.isNotBlank() },
+        card.note.takeIf { it.isNotBlank() }
+    ).joinToString("  ")
+
 @Composable
 fun FilterDialog(
     allNetworks: List<String>,
@@ -757,6 +1245,17 @@ fun CardGalleryItem(
         "信用卡" -> stringResource(R.string.credit_card)
         else -> card.cardCategory
     }
+    val isCreditCard = !card.noCard && card.cardCategory == "信用卡"
+    val creditLimitLabel = stringResource(R.string.credit_limit)
+    val creditLimitDisplay = if (card.creditLimit > 0.0) {
+        "$creditLimitLabel ${card.currency} ${formatCreditAmount(card.creditLimit)}"
+    } else ""
+    val billingDayDisplay = if (card.billingDay in 1..31) {
+        stringResource(R.string.billing_day_format, card.billingDay)
+    } else ""
+    val creditInfoText = listOf(creditLimitDisplay, billingDayDisplay)
+        .filter { it.isNotBlank() }
+        .joinToString("  ")
     val isDimmed = card.status == "cancelled" || card.status == "frozen"
 
     val bankLogoPicker  = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { onBankLogoPick(it) } }
@@ -876,6 +1375,10 @@ fun CardGalleryItem(
                         fontWeight = FontWeight.Medium)
             }
             // 备注（斜体小字）
+            if (isCreditCard && creditInfoText.isNotEmpty() && !dense) {
+                Text(creditInfoText, fontSize = noteFont, color = cs.onSurfaceVariant.copy(.62f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             if (card.note.isNotEmpty() && !dense) {
                 Text(card.note, fontSize = noteFont, color = cs.onSurfaceVariant.copy(.5f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -932,6 +1435,10 @@ fun CardGalleryItem(
                     Text(card.expiryDate, fontSize = expiryFont, lineHeight = if (compact) 10.sp else 12.sp,
                         color = cs.onSurfaceVariant.copy(.62f),
                         fontWeight = FontWeight.Medium)
+                if (isCreditCard && creditInfoText.isNotEmpty())
+                    Text(creditInfoText, fontSize = expiryFont, lineHeight = if (compact) 10.sp else 12.sp,
+                        color = cs.onSurfaceVariant.copy(.62f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -1017,6 +1524,17 @@ fun CardListItem(
         "信用卡" -> stringResource(R.string.credit_card)
         else -> card.cardCategory
     }
+    val isCreditCard = !card.noCard && card.cardCategory == "信用卡"
+    val creditLimitLabel = stringResource(R.string.credit_limit)
+    val creditLimitDisplay = if (card.creditLimit > 0.0) {
+        "$creditLimitLabel ${card.currency} ${formatCreditAmount(card.creditLimit)}"
+    } else ""
+    val billingDayDisplay = if (card.billingDay in 1..31) {
+        stringResource(R.string.billing_day_format, card.billingDay)
+    } else ""
+    val creditInfoText = listOf(creditLimitDisplay, billingDayDisplay)
+        .filter { it.isNotBlank() }
+        .joinToString("  ")
     val thumbModifier = if (isVerticalFace) {
         Modifier.width(43.dp).height(68.dp)
     } else {
@@ -1074,6 +1592,7 @@ fun CardListItem(
             if (!card.noCard && card.cardCategory.isNotEmpty() || card.note.isNotEmpty()) {
                 val parts = listOfNotNull(
                     if (!card.noCard && categoryDisplayName.isNotEmpty()) categoryDisplayName else null,
+                    if (isCreditCard && creditInfoText.isNotEmpty()) creditInfoText else null,
                     if (card.note.isNotEmpty()) card.note else null
                 )
                 Text(parts.joinToString("  "), fontSize = 10.sp,
@@ -1105,6 +1624,29 @@ fun SmallTag(text: String, bg: Color, textColor: Color, compact: Boolean = false
             fontWeight = FontWeight.SemiBold,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
+}
+
+private val creditAmountFormatter = DecimalFormat("#,##0.##")
+
+private fun formatCreditAmount(amount: Double): String =
+    creditAmountFormatter.format(amount)
+
+private fun formatCreditInputAmount(amount: Double): String =
+    if (amount <= 0.0) "" else DecimalFormat("0.##").format(amount)
+
+private fun sanitizeCreditLimitInput(raw: String): String {
+    var hasDot = false
+    val builder = StringBuilder()
+    raw.forEach { ch ->
+        when {
+            ch.isDigit() -> builder.append(ch)
+            ch == '.' && !hasDot -> {
+                hasDot = true
+                builder.append(ch)
+            }
+        }
+    }
+    return builder.toString().take(12)
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1174,7 +1716,8 @@ data class CardFormData(
     val isVirtual: Boolean, val noCard: Boolean, val logoImagePath: String,
     val bankLogoPath: String, val cardTypeName: String,
     val expiryDate: String, val cardCategory: String,
-    val imageOrientation: String, val groupId: String
+    val imageOrientation: String, val groupId: String,
+    val creditLimit: Double, val billingDay: Int
 )
 
 private enum class NfcFilledField {
@@ -1189,13 +1732,15 @@ private enum class NfcFilledField {
 @Composable
 fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), selectedGroupId: String = initial?.groupId ?: "",
                bankPresets: List<BankPreset> = emptyList(), onDismiss: () -> Unit,
-               onDelete: (() -> Unit)? = null, onSave: (CardFormData) -> Unit) {
+               onDelete: (() -> Unit)? = null, asPage: Boolean = false, onSave: (CardFormData) -> Unit) {
     var bank         by remember { mutableStateOf(initial?.bank ?: "") }
     var cardTypeName by remember { mutableStateOf(initial?.cardTypeName ?: "") }
     var network      by remember { mutableStateOf(initial?.network ?: "银联") }
     var currency     by remember { mutableStateOf(initial?.currency ?: "CNY") }
     var tail         by remember { mutableStateOf(initial?.tail ?: "") }
     var cardCategory by remember { mutableStateOf(initial?.cardCategory ?: "") }
+    var creditLimitText by remember { mutableStateOf(formatCreditInputAmount(initial?.creditLimit ?: 0.0)) }
+    var billingDay    by remember { mutableStateOf(initial?.billingDay?.takeIf { it in 1..31 } ?: 0) }
     var note         by remember { mutableStateOf(initial?.note ?: "") }
     var status       by remember { mutableStateOf(initial?.status ?: "active") }
     var isVirtual    by remember { mutableStateOf(initial?.isVirtual ?: false) }
@@ -1329,6 +1874,9 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
         "储蓄卡" to stringResource(R.string.debit_card),
         "信用卡" to stringResource(R.string.credit_card)
     )
+    val billingDayOptions = listOf(0 to stringResource(R.string.billing_day_unset)) +
+        (1..31).map { it to stringResource(R.string.billing_day_format, it) }
+    val isCreditCard = !noCard && cardCategory == "信用卡"
     val ungroupedLabel = stringResource(R.string.ungrouped_cards)
     val groupOptions = listOf("" to ungroupedLabel) + groups.map { it.id to it.name }
     val matchedBankPresets = remember(bank, bankLogoPath, bankPresets) {
@@ -1343,12 +1891,16 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
             .take(3)
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.responsiveDialogWidth(620.dp)) {
-            Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    @Composable
+    fun EditorBody(modifier: Modifier) {
+        Column(modifier.verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (asPage) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Default.ArrowBack, stringResource(R.string.close), modifier = Modifier.size(22.dp))
+                        }
+                    }
                     Text(
                         if (initial == null) stringResource(R.string.add_card) else stringResource(R.string.edit_card),
                         fontWeight = FontWeight.Bold,
@@ -1579,7 +2131,12 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 highlighted = NfcFilledField.CATEGORY in nfcFilledFields
                             ) { selected ->
                                 nfcFilledFields = nfcFilledFields - NfcFilledField.CATEGORY
-                                cardCategory = categoryOptions.find { it.second == selected }?.first ?: selected
+                                val nextCategory = categoryOptions.find { it.second == selected }?.first ?: selected
+                                cardCategory = nextCategory
+                                if (nextCategory != "信用卡") {
+                                    creditLimitText = ""
+                                    billingDay = 0
+                                }
                             }
                         }
                     }
@@ -1612,6 +2169,30 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                         colors = nfcTextFieldColors(NfcFilledField.EXPIRY in nfcFilledFields)
                     )
                 }
+                if (isCreditCard) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = creditLimitText,
+                            onValueChange = { creditLimitText = sanitizeCreditLimitInput(it) },
+                            label = { Text(stringResource(R.string.credit_limit_optional)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                        Box(Modifier.weight(1f)) {
+                            val selectedBillingDayLabel = billingDayOptions
+                                .firstOrNull { it.first == billingDay }
+                                ?.second ?: stringResource(R.string.billing_day_unset)
+                            DropdownField(
+                                stringResource(R.string.billing_day),
+                                billingDayOptions.map { it.second },
+                                selectedBillingDayLabel
+                            ) { selected ->
+                                billingDay = billingDayOptions.firstOrNull { it.second == selected }?.first ?: 0
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(value = note, onValueChange = { note = it },
                     label = { Text(stringResource(R.string.note_optional)) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1622,6 +2203,8 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                             if (it) {
                                 tail = ""
                                 cardCategory = ""
+                                creditLimitText = ""
+                                billingDay = 0
                                 nfcFilledFields = nfcFilledFields - NfcFilledField.TAIL - NfcFilledField.CATEGORY - NfcFilledField.NETWORK
                             }
                         })
@@ -1634,13 +2217,40 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                     onDelete?.let { OutlinedButton(onClick = it, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.delete), color = ColorRed) } }
                     Button(onClick = {
                         submitted = true
-                        if (bank.isNotBlank()) onSave(CardFormData(bank.trim(), network, currency,
-                            if (noCard) "" else tail.trim(), note.trim(), status, isVirtual, noCard,
-                            imagePath, bankLogoPath, cardTypeName.trim(),
-                            expiryDate, if (noCard) "" else cardCategory.ifBlank { "储蓄卡" },
-                            imageOrientation, groupId))
+                        if (bank.isNotBlank()) {
+                            val savingCategory = if (noCard) "" else cardCategory.ifBlank { "储蓄卡" }
+                            val savingCredit = savingCategory == "信用卡"
+                            onSave(CardFormData(bank.trim(), network, currency,
+                                if (noCard) "" else tail.trim(), note.trim(), status, isVirtual, noCard,
+                                imagePath, bankLogoPath, cardTypeName.trim(),
+                                expiryDate, savingCategory,
+                                imageOrientation, groupId,
+                                if (savingCredit) creditLimitText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0 else 0.0,
+                                if (savingCredit) billingDay.takeIf { it in 1..31 } ?: 0 else 0))
+                        }
                     }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.save)) }
                 }
+            }
+        }
+
+    if (asPage) {
+        BackHandler(onBack = onDismiss)
+        Surface(
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+        ) {
+            EditorBody(Modifier.fillMaxSize().padding(20.dp))
+        }
+    } else {
+        Dialog(onDismissRequest = onDismiss) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.responsiveDialogWidth(620.dp)
+            ) {
+                EditorBody(Modifier.padding(20.dp))
             }
         }
     }

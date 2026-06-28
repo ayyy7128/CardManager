@@ -125,6 +125,11 @@ fun CalendarScreen(vm: MainViewModel) {
     val exchangeRates by vm.exchangeRates.collectAsState()
     val assetTradingCalendarVersion by vm.assetTradingCalendarVersion.collectAsState()
     val runningAssetPlans = remember(assetPlans, exchangeRates) { assetPlans.filter { it.status != AssetPlanStatus.STOPPED } }
+    val assetOverlay = when {
+        showAssetEditor -> AssetOverlay.Editor(editingAsset)
+        viewingAsset != null -> AssetOverlay.Detail(viewingAsset!!)
+        else -> null
+    }
     var tradingDaysReady by remember(year) { mutableStateOf(TradingDayService.isLoaded(year)) }
     val selectedDate = remember(year, month, selectedDay) { LocalDate.of(year, month, selectedDay) }
     val assetPlanLogsById = remember(year, month, selectedDate, runningAssetPlans, exchangeRates, tradingDaysReady, assetTradingCalendarVersion) {
@@ -379,36 +384,23 @@ fun CalendarScreen(vm: MainViewModel) {
         }
     }
 
-    viewingAsset?.let { plan ->
-        AssetPlanDetailDialog(
-            plan = plan,
-            logs = vm.assetPlanLogs(plan),
-            amount = vm.assetPlanDisplayAmount(plan),
-            linkedCardName = vm.cardName(plan.cardId),
-            onDismiss = { viewingAsset = null },
-            onEdit = { editingAsset = plan; viewingAsset = null; showAssetEditor = true },
-            onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
-            fullScreen = true
-        )
-    }
-
-    if (showAssetEditor) {
-        AssetPlanEditorDialog(
-            initial = editingAsset,
-            cards = cards,
-            cardName = vm::cardName,
-            onDismiss = { showAssetEditor = false; editingAsset = null },
-            onSave = { plan ->
-                if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
-                showAssetEditor = false
-                editingAsset = null
-            },
-            onDelete = editingAsset?.let { plan ->
-                { vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
-            },
-            fullScreen = true
-        )
-    }
+    AssetOverlayHost(
+        overlay = assetOverlay,
+        cards = cards,
+        cardName = vm::cardName,
+        logs = { vm.assetPlanLogs(it) },
+        amount = { vm.assetPlanDisplayAmount(it) },
+        onDismissDetail = { viewingAsset = null },
+        onEditPlan = { plan -> editingAsset = plan; viewingAsset = null; showAssetEditor = true },
+        onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
+        onDismissEditor = { showAssetEditor = false; editingAsset = null },
+        onSavePlan = { plan ->
+            if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
+            showAssetEditor = false
+            editingAsset = null
+        },
+        onDeletePlan = { plan -> vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
+    )
 
     deletingTask?.let { task ->
         AlertDialog(

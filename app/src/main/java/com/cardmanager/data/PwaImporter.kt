@@ -136,7 +136,9 @@ object PwaImporter {
                     logoEmoji     = o.optString("logo", "").ifEmpty { o.optString("logoEmoji", "") },
                     logoImagePath = imagePath,
                     sortOrder     = i,
-                    imageOrientation = if (o.optString("imageOrientation", "horizontal") == "vertical") "vertical" else "horizontal"
+                    imageOrientation = if (o.optString("imageOrientation", "horizontal") == "vertical") "vertical" else "horizontal",
+                    creditLimit   = o.optDouble("creditLimit", 0.0).coerceAtLeast(0.0),
+                    billingDay    = o.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0
                 ))
             }
         }

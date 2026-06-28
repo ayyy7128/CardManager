@@ -1,6 +1,13 @@
 package com.cardmanager.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.cardmanager.R
 import com.cardmanager.data.AssetCalculator
 import com.cardmanager.data.AssetLogType
@@ -50,6 +58,78 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+
+internal sealed class AssetOverlay {
+    data class Detail(val plan: AssetPlan) : AssetOverlay()
+    data class Editor(val plan: AssetPlan?) : AssetOverlay()
+}
+
+@Composable
+internal fun AssetOverlayHost(
+    overlay: AssetOverlay?,
+    cards: List<Card>,
+    cardName: (String) -> String,
+    logs: (AssetPlan) -> List<com.cardmanager.data.AssetTransactionLog>,
+    amount: (AssetPlan) -> Double,
+    onDismissDetail: () -> Unit,
+    onEditPlan: (AssetPlan) -> Unit,
+    onAdjustment: (AssetPlan) -> Unit,
+    onDismissEditor: () -> Unit,
+    onSavePlan: (AssetPlan) -> Unit,
+    onDeletePlan: (AssetPlan) -> Unit
+) {
+    overlay?.let { overlayState ->
+        Dialog(
+            onDismissRequest = {
+                when (overlayState) {
+                    is AssetOverlay.Detail -> onDismissDetail()
+                    is AssetOverlay.Editor -> onDismissEditor()
+                }
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        ) {
+            AnimatedContent(
+                targetState = overlayState,
+                modifier = Modifier.fillMaxSize(),
+                label = "asset_overlay_transition",
+                transitionSpec = {
+                    val duration = 260
+                    (slideInHorizontally(tween(duration)) { it } + fadeIn(tween(duration))) togetherWith
+                        (slideOutHorizontally(tween(duration)) { -it / 4 } + fadeOut(tween(duration)))
+                }
+            ) { page ->
+                when (page) {
+                    is AssetOverlay.Detail -> {
+                        val plan = page.plan
+                        AssetPlanDetailDialog(
+                            plan = plan,
+                            logs = logs(plan),
+                            amount = amount(plan),
+                            linkedCardName = cardName(plan.cardId),
+                            onDismiss = onDismissDetail,
+                            onEdit = { onEditPlan(plan) },
+                            onAdjustment = onAdjustment,
+                            fullScreen = true
+                        )
+                    }
+
+                    is AssetOverlay.Editor -> {
+                        val plan = page.plan
+                        AssetPlanEditorDialog(
+                            initial = plan,
+                            cards = cards,
+                            cardName = cardName,
+                            onDismiss = onDismissEditor,
+                            onSave = onSavePlan,
+                            onDelete = plan?.let { { onDeletePlan(it) } },
+                            fullScreen = true
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -78,6 +158,11 @@ fun PiggyScreen(vm: MainViewModel) {
     val archivedAssetPlans = assetPlans.filter { it.status == AssetPlanStatus.STOPPED }
     val manualEntries = remember(entries) { entries.filter(::isManualQuickRecordEntry) }
     val vaultTotal = remember(vaultCurrency, exchangeRates, entries, assetPlans, assetTradingCalendarVersion) { vm.vaultTotalIn(vaultCurrency) }
+    val assetOverlay = when {
+        showAssetEditor -> AssetOverlay.Editor(editingAsset)
+        viewingAsset != null -> AssetOverlay.Detail(viewingAsset!!)
+        else -> null
+    }
 
     LaunchedEffect(snackMsg) {
         snackMsg?.let {
@@ -177,36 +262,23 @@ fun PiggyScreen(vm: MainViewModel) {
         SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
     }
 
-    viewingAsset?.let { plan ->
-        AssetPlanDetailDialog(
-            plan = plan,
-            logs = vm.assetPlanLogs(plan),
-            amount = vm.assetPlanDisplayAmount(plan),
-            linkedCardName = vm.cardName(plan.cardId),
-            onDismiss = { viewingAsset = null },
-            onEdit = { editingAsset = plan; viewingAsset = null; showAssetEditor = true },
-            onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
-            fullScreen = true
-        )
-    }
-
-    if (showAssetEditor) {
-        AssetPlanEditorDialog(
-            initial = editingAsset,
-            cards = cards,
-            cardName = vm::cardName,
-            onDismiss = { showAssetEditor = false; editingAsset = null },
-            onSave = { plan ->
-                if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
-                showAssetEditor = false
-                editingAsset = null
-            },
-            onDelete = editingAsset?.let { plan ->
-                { vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
-            },
-            fullScreen = true
-        )
-    }
+    AssetOverlayHost(
+        overlay = assetOverlay,
+        cards = cards,
+        cardName = vm::cardName,
+        logs = { vm.assetPlanLogs(it) },
+        amount = { vm.assetPlanDisplayAmount(it) },
+        onDismissDetail = { viewingAsset = null },
+        onEditPlan = { plan -> editingAsset = plan; viewingAsset = null; showAssetEditor = true },
+        onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
+        onDismissEditor = { showAssetEditor = false; editingAsset = null },
+        onSavePlan = { plan ->
+            if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
+            showAssetEditor = false
+            editingAsset = null
+        },
+        onDeletePlan = { plan -> vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
+    )
 
     if (showQuickRecordDetail) {
         QuickRecordDetailDialog(
@@ -578,59 +650,133 @@ fun AssetPlanDetailDialog(
     var showAdjustment by remember { mutableStateOf(false) }
     var editingLog by remember { mutableStateOf<com.cardmanager.data.AssetTransactionLog?>(null) }
     val cs = MaterialTheme.colorScheme
+    val visibleLogs = remember(logs) {
+        logs.filter { it.type != AssetLogType.SKIP_WEEKEND && it.type != AssetLogType.SKIP_PAUSE }
+            .reversed()
+    }
     if (fullScreen) {
         BackHandler { onDismiss() }
     }
-    val content: @Composable () -> Unit = {
-            Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    if (fullScreen) {
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.ChevronLeft, null, tint = cs.onSurface)
-                        }
+    val content: @Composable (Modifier) -> Unit = { modifier ->
+        LazyColumn(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.ChevronLeft, null, tint = cs.onBackground, modifier = Modifier.size(28.dp))
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(plan.name.ifBlank { "未命名计划" }, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text(assetCycleText(plan), fontSize = 12.sp, color = cs.onSurfaceVariant)
-                        if (linkedCardName.isNotBlank()) Text(linkedCardName, fontSize = 12.sp, color = cs.onSurfaceVariant)
+                        Text(
+                            plan.name.ifBlank { "未命名计划" },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 24.sp,
+                            color = cs.onBackground,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            listOf(assetCycleText(plan), linkedCardName).filter { it.isNotBlank() }.joinToString(" · "),
+                            fontSize = 13.sp,
+                            color = cs.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, null) }
+                    IconButton(onClick = onEdit, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Edit, null, tint = cs.primary, modifier = Modifier.size(26.dp))
+                    }
                 }
-                Text(AssetCalculator.formatMoney(amount, plan.currency), fontSize = 28.sp, fontWeight = FontWeight.Bold, color = ColorGold)
-                Button(onClick = { showAdjustment = true }, shape = RoundedCornerShape(12.dp)) { Text("资金调整") }
-                LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(logs.filter { it.type != AssetLogType.SKIP_WEEKEND && it.type != AssetLogType.SKIP_PAUSE }.reversed()) { log ->
-                        val editable = log.type == AssetLogType.PERIODIC || log.type == AssetLogType.ADJUSTMENT || log.type == AssetLogType.POSTPONED
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable(enabled = editable) { editingLog = log }
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(log.status, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                Text("${log.date}${if (log.note.isNotBlank()) " · ${log.note}" else ""}", fontSize = 11.sp, color = cs.onSurfaceVariant)
+            }
+
+            item {
+                Surface(shape = RoundedCornerShape(24.dp), color = cs.surface, modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier
+                            .border(1.dp, cs.outline.copy(alpha = 0.18f), RoundedCornerShape(24.dp))
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text("当前金额", fontSize = 13.sp, color = cs.onSurfaceVariant)
+                        Text(
+                            AssetCalculator.formatMoney(amount, plan.currency),
+                            fontSize = 40.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ColorGold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = { showAdjustment = true },
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Default.Tune, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("资金调整")
                             }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("${if (log.amount >= 0) "+" else ""}${AssetCalculator.formatMoney(log.amount, log.currency)}", fontSize = 13.sp, color = if (log.amount >= 0) ColorActive else ColorRed)
-                                if (editable) Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp), tint = cs.onSurfaceVariant)
+                            OutlinedButton(
+                                onClick = onEdit,
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("编辑计划")
                             }
                         }
                     }
                 }
             }
+
+            item {
+                Surface(shape = RoundedCornerShape(20.dp), color = cs.surface, modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier
+                            .border(1.dp, cs.outline.copy(alpha = 0.16f), RoundedCornerShape(20.dp))
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text("计划信息", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
+                        AssetPlanInfoRow("周期", assetCycleText(plan))
+                        if (linkedCardName.isNotBlank()) AssetPlanInfoRow("关联卡片", linkedCardName)
+                        AssetPlanInfoRow("币种", plan.currency)
+                        if (plan.platform.isNotBlank()) AssetPlanInfoRow("平台", plan.platform)
+                        if (plan.category.isNotBlank()) AssetPlanInfoRow("种类", plan.category)
+                        if (plan.code.isNotBlank()) AssetPlanInfoRow("代码", plan.code)
+                    }
+                }
+            }
+
+            item { SectionHeader("流水明细", subtitle = "${visibleLogs.size} 条") }
+
+            if (visibleLogs.isEmpty()) {
+                item {
+                    EmptyState(Icons.Default.Info, "暂无流水", "计划产生记录后会显示在这里")
+                }
+            } else {
+                items(visibleLogs) { log ->
+                    val editable = log.type == AssetLogType.PERIODIC || log.type == AssetLogType.ADJUSTMENT || log.type == AssetLogType.POSTPONED
+                    AssetLogRow(log = log, editable = editable, onClick = { editingLog = log })
+                }
+            }
+            item { Spacer(Modifier.windowInsetsPadding(WindowInsets.navigationBars).height(20.dp)) }
+        }
     }
     if (fullScreen) {
         Surface(color = cs.background, modifier = Modifier.fillMaxSize()) {
-            content()
+            content(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(20.dp))
         }
     } else {
         Dialog(onDismissRequest = onDismiss) {
             Surface(shape = RoundedCornerShape(18.dp), color = cs.surface, modifier = Modifier.responsiveDialogWidth()) {
-                content()
+                content(Modifier.heightIn(max = 640.dp).padding(20.dp))
             }
         }
     }
@@ -681,6 +827,82 @@ fun AssetPlanDetailDialog(
                 editingLog = null
             }
         )
+    }
+}
+
+@Composable
+private fun AssetPlanInfoRow(label: String, value: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, fontSize = 13.sp, color = cs.onSurfaceVariant, modifier = Modifier.width(72.dp))
+        Text(
+            value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = cs.onSurface,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun AssetLogRow(
+    log: com.cardmanager.data.AssetTransactionLog,
+    editable: Boolean,
+    onClick: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val amountColor = if (log.amount >= 0) ColorActive else ColorRed
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = cs.surface,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = editable, onClick = onClick)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(amountColor.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    if (log.amount >= 0) Icons.Default.Add else Icons.Default.Remove,
+                    null,
+                    tint = amountColor,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(log.status, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
+                Text(
+                    "${log.date}${if (log.note.isNotBlank()) " · ${log.note}" else ""}",
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    "${if (log.amount >= 0) "+" else ""}${AssetCalculator.formatMoney(log.amount, log.currency)}",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = amountColor
+                )
+                if (editable) {
+                    Icon(Icons.Default.Edit, null, modifier = Modifier.size(14.dp), tint = cs.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
@@ -785,8 +1007,11 @@ fun AssetPlanEditorDialog(
     if (fullScreen) {
         BackHandler { onDismiss() }
     }
-    val content: @Composable () -> Unit = {
-            Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val content: @Composable (Modifier) -> Unit = { modifier ->
+            Column(
+                modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     if (fullScreen) {
                         IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
@@ -965,15 +1190,13 @@ fun AssetPlanEditorDialog(
             }
     }
     if (fullScreen) {
-        Box(Modifier.fillMaxSize().background(cs.background)) {
-            Surface(color = cs.surface, modifier = Modifier.fillMaxSize()) {
-                content()
-            }
+        Surface(color = cs.background, modifier = Modifier.fillMaxSize()) {
+            content(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(20.dp))
         }
     } else {
         Dialog(onDismissRequest = onDismiss) {
             Surface(shape = RoundedCornerShape(18.dp), color = cs.surface, modifier = Modifier.responsiveDialogWidth()) {
-                content()
+                content(Modifier.padding(20.dp))
             }
         }
     }

@@ -32,7 +32,9 @@ data class Card(
     val expiryDate: String = "",   // 有效期 格式 MM/yy
     val cardCategory: String = "",  // 卡类型：储蓄卡 / 信用卡（纯账户留空）
     val sortOrder: Int = 0,
-    val imageOrientation: String = "horizontal" // 卡面方向：horizontal / vertical
+    val imageOrientation: String = "horizontal", // 卡面方向：horizontal / vertical
+    val creditLimit: Double = 0.0,  // 信用卡额度
+    val billingDay: Int = 0         // 信用卡账单日，0 表示未设置
 )
 
 @Entity(tableName = "tasks")
