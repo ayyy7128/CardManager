@@ -122,7 +122,8 @@ data class AssetOverrideLog(
     val amount: Double,
     val status: String,
     val note: String = "",
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val type: String = ""
 )
 data class AssetTransactionLog(
     val date: String,

@@ -238,7 +238,7 @@
     <string name="font_reset_snackbar">Default font restored. Restart to apply it.</string>
     <string name="restore_default_font">Restore default font</string>
     <string name="about">About</string>
-    <string name="version_1">Version 2.0.0</string>
+    <string name="version_1">Version 2.0.1</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">Data stays on this device. Nothing is uploaded.</string>
     <string name="support_development">Support development</string>

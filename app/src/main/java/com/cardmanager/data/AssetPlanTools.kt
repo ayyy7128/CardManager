@@ -31,7 +31,8 @@ object AssetPlanCodec {
                 .put("amount", it.amount)
                 .put("status", it.status)
                 .put("note", it.note)
-                .put("isDeleted", it.isDeleted))
+                .put("isDeleted", it.isDeleted)
+                .put("type", it.type))
         }
     }.toString()
 
@@ -41,7 +42,8 @@ object AssetPlanCodec {
             amount = o.optDouble("amount", 0.0),
             status = o.optString("status"),
             note = o.optString("note"),
-            isDeleted = o.optBoolean("isDeleted", false)
+            isDeleted = o.optBoolean("isDeleted", false),
+            type = o.optString("type")
         )
     }
 
@@ -77,6 +79,9 @@ object AssetCalculator {
         }
 
         val overrides = AssetPlanCodec.decodeOverrides(plan.overridesJson)
+        fun overrideFor(date: String, type: String): AssetOverrideLog? =
+            overrides.firstOrNull { it.date == date && it.type == type }
+                ?: overrides.firstOrNull { it.date == date && it.type.isBlank() }
         val ratePlans = AssetPlanCodec.decodeRatePlans(plan.ratePlansJson)
             .mapNotNull { rp -> parseDate(rp.startDate)?.let { it to rp } }
             .sortedBy { it.first }
@@ -85,16 +90,17 @@ object AssetCalculator {
             val firstDate = ratePlans.first().first
             val firstPlan = ratePlans.first().second
             if (!firstDate.isAfter(today)) {
-                val override = overrides.firstOrNull { it.date == firstDate.toString() }
+                val firstDateText = firstDate.toString()
+                val override = overrideFor(firstDateText, AssetLogType.PERIODIC)
                 when {
                     override != null && override.isDeleted -> Unit
                     override != null -> {
                         total += override.amount
-                        logs += AssetTransactionLog(firstDate.toString(), override.amount, override.status, plan.currency, AssetLogType.PERIODIC, override.note)
+                        logs += AssetTransactionLog(firstDateText, override.amount, override.status.ifBlank { "单次投入" }, plan.currency, AssetLogType.PERIODIC, override.note)
                     }
                     firstPlan.amount != 0.0 -> {
                         total += firstPlan.amount
-                        logs += AssetTransactionLog(firstDate.toString(), firstPlan.amount, "单次投入", plan.currency, AssetLogType.PERIODIC)
+                        logs += AssetTransactionLog(firstDateText, firstPlan.amount, "单次投入", plan.currency, AssetLogType.PERIODIC)
                     }
                 }
             }
@@ -106,8 +112,19 @@ object AssetCalculator {
 
             if (plan.includeFirstDay && !firstDate.isAfter(today)) {
                 val firstPlan = ratePlans.first().second
-                total += firstPlan.amount
-                logs += AssetTransactionLog(firstDate.toString(), firstPlan.amount, "定投成功", plan.currency, AssetLogType.PERIODIC)
+                val firstDateText = firstDate.toString()
+                val override = overrideFor(firstDateText, AssetLogType.PERIODIC)
+                when {
+                    override != null && override.isDeleted -> Unit
+                    override != null -> {
+                        total += override.amount
+                        logs += AssetTransactionLog(firstDateText, override.amount, override.status.ifBlank { "定投成功" }, plan.currency, AssetLogType.PERIODIC, override.note)
+                    }
+                    else -> {
+                        total += firstPlan.amount
+                        logs += AssetTransactionLog(firstDateText, firstPlan.amount, "定投成功", plan.currency, AssetLogType.PERIODIC)
+                    }
+                }
                 cursor = firstDate.plusDays(1)
             }
 
@@ -122,11 +139,12 @@ object AssetCalculator {
                 val tradingDay = !nonTradingDay
 
                 if (isRunDay && activePlan != null) {
-                    val override = overrides.firstOrNull { it.date == cursor.toString() }
+                    val dateText = cursor.toString()
+                    val override = overrideFor(dateText, AssetLogType.PERIODIC)
                     if (override != null) {
                         if (!override.isDeleted) {
                             total += override.amount
-                            logs += AssetTransactionLog(cursor.toString(), override.amount, override.status, plan.currency, AssetLogType.PERIODIC, override.note)
+                            logs += AssetTransactionLog(dateText, override.amount, override.status.ifBlank { "定投成功" }, plan.currency, AssetLogType.PERIODIC, override.note)
                         }
                     } else if (!tradingDay) {
                         if (plan.postponeNonTrading) {
@@ -146,8 +164,17 @@ object AssetCalculator {
                     }
                 }
                 if (plan.postponeNonTrading && postponedAmount > 0.0 && tradingDay) {
-                    total += postponedAmount
-                    logs += AssetTransactionLog(cursor.toString(), postponedAmount, "顺延补单", plan.currency, AssetLogType.POSTPONED)
+                    val dateText = cursor.toString()
+                    val override = overrideFor(dateText, AssetLogType.POSTPONED)
+                    if (override != null) {
+                        if (!override.isDeleted) {
+                            total += override.amount
+                            logs += AssetTransactionLog(dateText, override.amount, override.status.ifBlank { "顺延补单" }, plan.currency, AssetLogType.POSTPONED, override.note)
+                        }
+                    } else {
+                        total += postponedAmount
+                        logs += AssetTransactionLog(dateText, postponedAmount, "顺延补单", plan.currency, AssetLogType.POSTPONED)
+                    }
                     postponedAmount = 0.0
                 }
                 cursor = cursor.plusDays(1)

@@ -806,8 +806,8 @@ fun AssetPlanDetailDialog(
                     onAdjustment(plan.copy(adjustmentsJson = AssetPlanCodec.encodeAdjustments(next)))
                 } else {
                     val next = AssetPlanCodec.decodeOverrides(plan.overridesJson)
-                        .filterNot { it.date == log.date } +
-                        AssetOverrideLog(log.date, amount, status.ifBlank { "定投成功" }, note)
+                        .filterNot { it.date == log.date && (it.type == log.type || it.type.isBlank()) } +
+                        AssetOverrideLog(log.date, amount, status.ifBlank { log.status }, note, type = log.type)
                     onAdjustment(plan.copy(overridesJson = AssetPlanCodec.encodeOverrides(next)))
                 }
                 editingLog = null
@@ -820,8 +820,8 @@ fun AssetPlanDetailDialog(
                     onAdjustment(plan.copy(adjustmentsJson = AssetPlanCodec.encodeAdjustments(next)))
                 } else {
                     val next = AssetPlanCodec.decodeOverrides(plan.overridesJson)
-                        .filterNot { it.date == log.date } +
-                        AssetOverrideLog(log.date, 0.0, "已删除", "", isDeleted = true)
+                        .filterNot { it.date == log.date && (it.type == log.type || it.type.isBlank()) } +
+                        AssetOverrideLog(log.date, 0.0, "已删除", "", isDeleted = true, type = log.type)
                     onAdjustment(plan.copy(overridesJson = AssetPlanCodec.encodeOverrides(next)))
                 }
                 editingLog = null

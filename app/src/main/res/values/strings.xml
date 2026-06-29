@@ -238,7 +238,7 @@
     <string name="font_reset_snackbar">已恢复默认字体，重启生效</string>
     <string name="restore_default_font">恢复默认字体</string>
     <string name="about">关于</string>
-    <string name="version_1">&#x7248;&#x672C; 2.0.0</string>
+    <string name="version_1">&#x7248;&#x672C; 2.0.1</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">数据仅存储于本机，不联网，不上传任何信息</string>
     <string name="support_development">&#x652F;&#x6301;&#x5F00;&#x53D1;</string>
