@@ -34,7 +34,8 @@ data class Card(
     val sortOrder: Int = 0,
     val imageOrientation: String = "horizontal", // 卡面方向：horizontal / vertical
     val creditLimit: Double = 0.0,  // 信用卡额度
-    val billingDay: Int = 0         // 信用卡账单日，0 表示未设置
+    val billingDay: Int = 0,        // 信用卡账单日，0 表示未设置
+    val repaymentDay: Int = 0       // 信用卡还款日，0 表示未设置
 )
 
 @Entity(tableName = "tasks")

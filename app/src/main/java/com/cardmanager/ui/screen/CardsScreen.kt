@@ -682,7 +682,7 @@ fun CardsScreen(vm: MainViewModel) {
                         vm.addCard(d.groupId, d.bank, d.network, d.currency, d.tail, d.note,
                             d.status, d.isVirtual, d.noCard, "", d.logoImagePath, d.bankLogoPath,
                             d.cardTypeName, d.expiryDate, d.cardCategory, d.imageOrientation,
-                            d.creditLimit, d.billingDay)
+                            d.creditLimit, d.billingDay, d.repaymentDay)
                         showAddCard = null
                     }
 
@@ -704,7 +704,8 @@ fun CardsScreen(vm: MainViewModel) {
                                 bankLogoPath = d.bankLogoPath, cardTypeName = d.cardTypeName,
                                 expiryDate = d.expiryDate, cardCategory = d.cardCategory,
                                 sortOrder = nextOrder, imageOrientation = d.imageOrientation,
-                                creditLimit = d.creditLimit, billingDay = d.billingDay))
+                                creditLimit = d.creditLimit, billingDay = d.billingDay,
+                                repaymentDay = d.repaymentDay))
                             editingCard = null
                         }
                     }
@@ -1041,6 +1042,7 @@ private fun CardFocusPage(
                     if (card.expiryDate.isNotBlank()) FocusInfoRow(stringResource(R.string.expiry_optional), card.expiryDate)
                     if (card.creditLimit > 0.0) FocusInfoRow(stringResource(R.string.credit_limit), "${card.currency} ${formatCreditAmount(card.creditLimit)}")
                     if (card.billingDay in 1..31) FocusInfoRow(stringResource(R.string.billing_day), stringResource(R.string.billing_day_format, card.billingDay))
+                    if (card.repaymentDay in 1..31) FocusInfoRow(stringResource(R.string.repayment_day), stringResource(R.string.billing_day_format, card.repaymentDay))
                     if (card.note.isNotBlank()) FocusInfoRow(stringResource(R.string.note_optional), card.note)
                 }
             }
@@ -1247,15 +1249,11 @@ fun CardGalleryItem(
     }
     val isCreditCard = !card.noCard && card.cardCategory == "信用卡"
     val creditLimitLabel = stringResource(R.string.credit_limit)
-    val creditLimitDisplay = if (card.creditLimit > 0.0) {
-        "$creditLimitLabel ${card.currency} ${formatCreditAmount(card.creditLimit)}"
-    } else ""
-    val billingDayDisplay = if (card.billingDay in 1..31) {
-        stringResource(R.string.billing_day_format, card.billingDay)
-    } else ""
-    val creditInfoText = listOf(creditLimitDisplay, billingDayDisplay)
-        .filter { it.isNotBlank() }
-        .joinToString("  ")
+    val creditMetaTags = listOfNotNull(
+        if (card.creditLimit > 0.0) "$creditLimitLabel ${formatCreditAmount(card.creditLimit)}" else null,
+        if (card.billingDay in 1..31) "${stringResource(R.string.billing_day)} ${stringResource(R.string.day_short_format, card.billingDay)}" else null,
+        if (card.repaymentDay in 1..31) "${stringResource(R.string.repayment_day)} ${stringResource(R.string.day_short_format, card.repaymentDay)}" else null
+    )
     val isDimmed = card.status == "cancelled" || card.status == "frozen"
 
     val bankLogoPicker  = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { onBankLogoPick(it) } }
@@ -1375,9 +1373,15 @@ fun CardGalleryItem(
                         fontWeight = FontWeight.Medium)
             }
             // 备注（斜体小字）
-            if (isCreditCard && creditInfoText.isNotEmpty() && !dense) {
-                Text(creditInfoText, fontSize = noteFont, color = cs.onSurfaceVariant.copy(.62f),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (isCreditCard && creditMetaTags.isNotEmpty() && !dense) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(tagSpacing),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    creditMetaTags.forEach {
+                        SmallTag(it, cs.primary.copy(.08f), cs.primary.copy(.82f), compact)
+                    }
+                }
             }
             if (card.note.isNotEmpty() && !dense) {
                 Text(card.note, fontSize = noteFont, color = cs.onSurfaceVariant.copy(.5f),
@@ -1435,10 +1439,16 @@ fun CardGalleryItem(
                     Text(card.expiryDate, fontSize = expiryFont, lineHeight = if (compact) 10.sp else 12.sp,
                         color = cs.onSurfaceVariant.copy(.62f),
                         fontWeight = FontWeight.Medium)
-                if (isCreditCard && creditInfoText.isNotEmpty())
-                    Text(creditInfoText, fontSize = expiryFont, lineHeight = if (compact) 10.sp else 12.sp,
-                        color = cs.onSurfaceVariant.copy(.62f),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (isCreditCard && creditMetaTags.isNotEmpty() && !dense) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(tagSpacing),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        creditMetaTags.forEach {
+                            SmallTag(it, cs.primary.copy(.08f), cs.primary.copy(.82f), compact)
+                        }
+                    }
+                }
             }
         }
     }
@@ -1526,26 +1536,22 @@ fun CardListItem(
     }
     val isCreditCard = !card.noCard && card.cardCategory == "信用卡"
     val creditLimitLabel = stringResource(R.string.credit_limit)
-    val creditLimitDisplay = if (card.creditLimit > 0.0) {
-        "$creditLimitLabel ${card.currency} ${formatCreditAmount(card.creditLimit)}"
-    } else ""
-    val billingDayDisplay = if (card.billingDay in 1..31) {
-        stringResource(R.string.billing_day_format, card.billingDay)
-    } else ""
-    val creditInfoText = listOf(creditLimitDisplay, billingDayDisplay)
-        .filter { it.isNotBlank() }
-        .joinToString("  ")
+    val creditMetaTags = listOfNotNull(
+        if (card.creditLimit > 0.0) "$creditLimitLabel ${formatCreditAmount(card.creditLimit)}" else null,
+        if (card.billingDay in 1..31) "${stringResource(R.string.billing_day)} ${stringResource(R.string.day_short_format, card.billingDay)}" else null,
+        if (card.repaymentDay in 1..31) "${stringResource(R.string.repayment_day)} ${stringResource(R.string.day_short_format, card.repaymentDay)}" else null
+    )
     val thumbModifier = if (isVerticalFace) {
         Modifier.width(43.dp).height(68.dp)
     } else {
         Modifier.width(68.dp).height(43.dp)
     }
 
-    Row(Modifier.fillMaxWidth().clip(ItemShape)
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(ItemShape)
         .background(cs.surface.copy(if (isDimmed) .55f else 1f))
         .border(1.dp, cs.outline.copy(alpha = 0.18f), ItemShape)
         .clickable { onEdit() }, verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(4.dp).height(68.dp).background(statusColor.copy(if (isDimmed) .4f else .8f)))
+        Box(Modifier.width(4.dp).fillMaxHeight().background(statusColor.copy(if (isDimmed) .4f else .8f)))
         Spacer(Modifier.width(10.dp))
         // Logo 缩略
         Box(thumbModifier.clip(RoundedCornerShape(8.dp)).background(nc.bg), contentAlignment = Alignment.Center) {
@@ -1572,10 +1578,15 @@ fun CardListItem(
                         maxLines = 1)
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
                     if (!card.noCard) SmallTag(networkDisplayName, nc.bg, nc.text)
                     SmallTag(card.currency, cs.outline.copy(.2f), cs.onSurfaceVariant)
+                    if (!card.noCard && categoryDisplayName.isNotEmpty())
+                        SmallTag(categoryDisplayName, cs.outline.copy(.15f), cs.onSurfaceVariant)
                     Row(Modifier.clip(RoundedCornerShape(3.dp)).background(statusColor.copy(.15f))
                         .padding(horizontal = 4.dp, vertical = 1.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1589,13 +1600,18 @@ fun CardListItem(
                         color = cs.onSurfaceVariant.copy(.55f),
                         fontWeight = FontWeight.Medium)
             }
-            if (!card.noCard && card.cardCategory.isNotEmpty() || card.note.isNotEmpty()) {
-                val parts = listOfNotNull(
-                    if (!card.noCard && categoryDisplayName.isNotEmpty()) categoryDisplayName else null,
-                    if (isCreditCard && creditInfoText.isNotEmpty()) creditInfoText else null,
-                    if (card.note.isNotEmpty()) card.note else null
-                )
-                Text(parts.joinToString("  "), fontSize = 10.sp,
+            if (isCreditCard && creditMetaTags.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    creditMetaTags.forEach {
+                        SmallTag(it, cs.primary.copy(.08f), cs.primary.copy(.82f))
+                    }
+                }
+            }
+            if (card.note.isNotEmpty()) {
+                Text(card.note, fontSize = 10.sp,
                     color = cs.onSurfaceVariant.copy(.5f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -1717,7 +1733,7 @@ data class CardFormData(
     val bankLogoPath: String, val cardTypeName: String,
     val expiryDate: String, val cardCategory: String,
     val imageOrientation: String, val groupId: String,
-    val creditLimit: Double, val billingDay: Int
+    val creditLimit: Double, val billingDay: Int, val repaymentDay: Int
 )
 
 private enum class NfcFilledField {
@@ -1741,6 +1757,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     var cardCategory by remember { mutableStateOf(initial?.cardCategory ?: "") }
     var creditLimitText by remember { mutableStateOf(formatCreditInputAmount(initial?.creditLimit ?: 0.0)) }
     var billingDay    by remember { mutableStateOf(initial?.billingDay?.takeIf { it in 1..31 } ?: 0) }
+    var repaymentDay  by remember { mutableStateOf(initial?.repaymentDay?.takeIf { it in 1..31 } ?: 0) }
     var note         by remember { mutableStateOf(initial?.note ?: "") }
     var status       by remember { mutableStateOf(initial?.status ?: "active") }
     var isVirtual    by remember { mutableStateOf(initial?.isVirtual ?: false) }
@@ -2136,6 +2153,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 if (nextCategory != "信用卡") {
                                     creditLimitText = ""
                                     billingDay = 0
+                                    repaymentDay = 0
                                 }
                             }
                         }
@@ -2170,15 +2188,15 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                     )
                 }
                 if (isCreditCard) {
+                    OutlinedTextField(
+                        value = creditLimitText,
+                        onValueChange = { creditLimitText = sanitizeCreditLimitInput(it) },
+                        label = { Text(stringResource(R.string.credit_limit_optional)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = creditLimitText,
-                            onValueChange = { creditLimitText = sanitizeCreditLimitInput(it) },
-                            label = { Text(stringResource(R.string.credit_limit_optional)) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                        )
                         Box(Modifier.weight(1f)) {
                             val selectedBillingDayLabel = billingDayOptions
                                 .firstOrNull { it.first == billingDay }
@@ -2189,6 +2207,18 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 selectedBillingDayLabel
                             ) { selected ->
                                 billingDay = billingDayOptions.firstOrNull { it.second == selected }?.first ?: 0
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            val selectedRepaymentDayLabel = billingDayOptions
+                                .firstOrNull { it.first == repaymentDay }
+                                ?.second ?: stringResource(R.string.billing_day_unset)
+                            DropdownField(
+                                stringResource(R.string.repayment_day),
+                                billingDayOptions.map { it.second },
+                                selectedRepaymentDayLabel
+                            ) { selected ->
+                                repaymentDay = billingDayOptions.firstOrNull { it.second == selected }?.first ?: 0
                             }
                         }
                     }
@@ -2205,6 +2235,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 cardCategory = ""
                                 creditLimitText = ""
                                 billingDay = 0
+                                repaymentDay = 0
                                 nfcFilledFields = nfcFilledFields - NfcFilledField.TAIL - NfcFilledField.CATEGORY - NfcFilledField.NETWORK
                             }
                         })
@@ -2226,7 +2257,8 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 expiryDate, savingCategory,
                                 imageOrientation, groupId,
                                 if (savingCredit) creditLimitText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0 else 0.0,
-                                if (savingCredit) billingDay.takeIf { it in 1..31 } ?: 0 else 0))
+                                if (savingCredit) billingDay.takeIf { it in 1..31 } ?: 0 else 0,
+                                if (savingCredit) repaymentDay.takeIf { it in 1..31 } ?: 0 else 0))
                         }
                     }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.save)) }
                 }

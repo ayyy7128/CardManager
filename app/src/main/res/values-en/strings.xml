@@ -71,8 +71,10 @@
     <string name="credit_limit">Limit</string>
     <string name="credit_limit_optional">Limit (optional)</string>
     <string name="billing_day">Billing day</string>
+    <string name="repayment_day">Payment due day</string>
     <string name="billing_day_unset">Not set</string>
     <string name="billing_day_format">Day %1$d monthly</string>
+    <string name="day_short_format">Day %1$d</string>
     <string name="note_optional">Note (optional)</string>
     <string name="pure_account">Account only</string>
     <string name="delete_group_title">Delete group?</string>
@@ -238,7 +240,7 @@
     <string name="font_reset_snackbar">Default font restored. Restart to apply it.</string>
     <string name="restore_default_font">Restore default font</string>
     <string name="about">About</string>
-    <string name="version_1">Version 2.0.1</string>
+    <string name="version_1">Version 2.1.0</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">Data stays on this device. Nothing is uploaded.</string>
     <string name="support_development">Support development</string>

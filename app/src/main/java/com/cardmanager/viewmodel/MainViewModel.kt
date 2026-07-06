@@ -494,13 +494,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 note: String, status: String, isVirtual: Boolean, noCard: Boolean,
                 logoEmoji: String = "", logoImagePath: String = "", bankLogoPath: String = "",
                 cardTypeName: String = "", expiryDate: String = "", cardCategory: String = "",
-                imageOrientation: String = "horizontal", creditLimit: Double = 0.0, billingDay: Int = 0) {
+                imageOrientation: String = "horizontal", creditLimit: Double = 0.0, billingDay: Int = 0,
+                repaymentDay: Int = 0) {
         viewModelScope.launch {
             val order = cards.value.count { it.groupId == groupId }
             repo.saveCard(Card(UUID.randomUUID().toString(), groupId, bank, network, currency,
                 tail, "", note, status, isVirtual, noCard, logoEmoji, logoImagePath,
                 bankLogoPath, cardTypeName, expiryDate, cardCategory, order, imageOrientation,
-                creditLimit.coerceAtLeast(0.0), billingDay.takeIf { it in 1..31 } ?: 0))
+                creditLimit.coerceAtLeast(0.0), billingDay.takeIf { it in 1..31 } ?: 0,
+                repaymentDay.takeIf { it in 1..31 } ?: 0))
         }
     }
     fun updateCard(c: Card) {

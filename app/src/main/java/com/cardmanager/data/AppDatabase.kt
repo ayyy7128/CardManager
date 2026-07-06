@@ -11,7 +11,7 @@ import java.io.File
 
 @Database(
     entities = [CardGroup::class, Card::class, Task::class, PiggyEntry::class, AssetPlan::class, AppSetting::class],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -148,6 +148,14 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val M_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                if (!db.hasColumn("cards", "repaymentDay")) {
+                    db.execSQL("ALTER TABLE cards ADD COLUMN repaymentDay INTEGER NOT NULL DEFAULT 0")
+                }
+            }
+        }
+
         // v6: 添加有效期字段
         private val M_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -214,7 +222,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "cardmanager.db")
-                .addMigrations(M_1_2, M_2_3, M_3_4, M_4_5, M_5_6, M_6_7, M_7_8, M_8_9, M_9_10, M_10_11)
+                .addMigrations(M_1_2, M_2_3, M_3_4, M_4_5, M_5_6, M_6_7, M_7_8, M_8_9, M_9_10, M_10_11, M_11_12)
                 .build().also { INSTANCE = it }
         }
     }
@@ -509,7 +517,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             "\"order\":${c.sortOrder},\"cardTypeName\":\"${esc(c.cardTypeName)}\"," +
             "\"logoFile\":\"${esc(lf)}\",\"bankLogoFile\":\"${esc(bf)}\",\"expiryDate\":\"${esc(c.expiryDate)}\"," +
             "\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\"," +
-            "\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay}}"
+            "\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay}}"
         }}]")
         fun tj(t: Task) = "{\"id\":\"${t.id}\",\"name\":\"${esc(t.name)}\",\"freq\":\"${t.freq}\"," +
             "\"cardId\":\"${t.cardId}\",\"isInvest\":${t.isInvest},\"investAmount\":${t.investAmount}," +
@@ -674,7 +682,8 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 sortOrder = c.optInt("order", i),
                 imageOrientation = normalizedOrientation(c.optString("imageOrientation", "horizontal")),
                 creditLimit = c.optDouble("creditLimit", 0.0).coerceAtLeast(0.0),
-                billingDay = c.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0))
+                billingDay = c.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0,
+                repaymentDay = c.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0))
         }
 
         // Tasks
@@ -755,7 +764,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         val sb = StringBuilder("{")
         sb.append("\"groups\":[${grps.joinToString(",") { g -> "{\"id\":\"${g.id}\",\"name\":\"${esc(g.name)}\",\"icon\":\"${g.icon}\",\"isOpen\":${g.isOpen},\"order\":${g.sortOrder}}" }}]")
-        sb.append(",\"cards\":[${cds.joinToString(",") { c -> "{\"id\":\"${c.id}\",\"gid\":\"${c.groupId}\",\"bank\":\"${esc(c.bank)}\",\"network\":\"${c.network}\",\"currency\":\"${c.currency}\",\"tail\":\"${c.tail}\",\"role\":\"${esc(c.role)}\",\"note\":\"${esc(c.note)}\",\"status\":\"${c.status}\",\"isVirtual\":${c.isVirtual},\"noCard\":${c.noCard},\"logo\":\"${c.logoEmoji}\",\"order\":${c.sortOrder},\"expiryDate\":\"${esc(c.expiryDate)}\",\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\",\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay}}" }}]")
+        sb.append(",\"cards\":[${cds.joinToString(",") { c -> "{\"id\":\"${c.id}\",\"gid\":\"${c.groupId}\",\"bank\":\"${esc(c.bank)}\",\"network\":\"${c.network}\",\"currency\":\"${c.currency}\",\"tail\":\"${c.tail}\",\"role\":\"${esc(c.role)}\",\"note\":\"${esc(c.note)}\",\"status\":\"${c.status}\",\"isVirtual\":${c.isVirtual},\"noCard\":${c.noCard},\"logo\":\"${c.logoEmoji}\",\"order\":${c.sortOrder},\"expiryDate\":\"${esc(c.expiryDate)}\",\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\",\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay}}" }}]")
         val monthly = tsks.filter { it.freq=="monthly" }; val weekly = tsks.filter { it.freq=="weekly" }
         val quarterly = tsks.filter { it.freq=="quarterly" }; val ndays = tsks.filter { it.freq=="ndays" }
         val once = tsks.filter { it.freq=="once" }

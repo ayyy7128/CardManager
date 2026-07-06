@@ -71,8 +71,10 @@
     <string name="credit_limit">额度</string>
     <string name="credit_limit_optional">额度（选填）</string>
     <string name="billing_day">账单日</string>
+    <string name="repayment_day">还款日</string>
     <string name="billing_day_unset">未设置</string>
     <string name="billing_day_format">每月 %1$d 日</string>
+    <string name="day_short_format">%1$d日</string>
     <string name="note_optional">备注（选填）</string>
     <string name="pure_account">纯账户</string>
     <string name="delete_group_title">删除分组？</string>
@@ -238,7 +240,7 @@
     <string name="font_reset_snackbar">已恢复默认字体，重启生效</string>
     <string name="restore_default_font">恢复默认字体</string>
     <string name="about">关于</string>
-    <string name="version_1">&#x7248;&#x672C; 2.0.1</string>
+    <string name="version_1">&#x7248;&#x672C; 2.1.0</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">数据仅存储于本机，不联网，不上传任何信息</string>
     <string name="support_development">&#x652F;&#x6301;&#x5F00;&#x53D1;</string>
