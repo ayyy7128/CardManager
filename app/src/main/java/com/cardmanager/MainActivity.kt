@@ -1,5 +1,6 @@
 package com.cardmanager
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -42,11 +43,24 @@ import com.cardmanager.ui.screen.*
 import com.cardmanager.ui.theme.*
 import com.cardmanager.viewmodel.MainViewModel
 
+const val EXTRA_WIDGET_TARGET_TAB = "com.cardmanager.extra.WIDGET_TARGET_TAB"
+const val EXTRA_WIDGET_ASSET_PLAN_ID = "com.cardmanager.extra.WIDGET_ASSET_PLAN_ID"
+const val WIDGET_TARGET_CARDS = "cards"
+const val WIDGET_TARGET_CALENDAR = "calendar"
+const val WIDGET_TARGET_PIGGY = "piggy"
+
+data class WidgetLaunchRequest(
+    val targetTab: String,
+    val assetPlanId: String = ""
+)
+
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
+    private var widgetLaunchRequest by mutableStateOf<WidgetLaunchRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        widgetLaunchRequest = widgetLaunchRequestFrom(intent)
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
@@ -86,11 +100,30 @@ class MainActivity : ComponentActivity() {
                     CompositionLocalProvider(
                         LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1.12f))
                     ) {
-                        CardManagerApp(vm)
+                        CardManagerApp(
+                            vm = vm,
+                            launchRequest = widgetLaunchRequest,
+                            onLaunchRequestConsumed = { widgetLaunchRequest = null }
+                        )
                     }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        widgetLaunchRequest = widgetLaunchRequestFrom(intent)
+    }
+
+    private fun widgetLaunchRequestFrom(intent: Intent?): WidgetLaunchRequest? {
+        val targetTab = intent?.getStringExtra(EXTRA_WIDGET_TARGET_TAB)?.takeIf { it.isNotBlank() }
+            ?: return null
+        return WidgetLaunchRequest(
+            targetTab = targetTab,
+            assetPlanId = intent.getStringExtra(EXTRA_WIDGET_ASSET_PLAN_ID).orEmpty()
+        )
     }
 }
 
@@ -107,8 +140,14 @@ fun tabById(id: String): NavTab? = tabs.firstOrNull { it.id == id }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
-fun CardManagerApp(vm: MainViewModel) {
+fun CardManagerApp(
+    vm: MainViewModel,
+    launchRequest: WidgetLaunchRequest? = null,
+    onLaunchRequestConsumed: () -> Unit = {}
+) {
     var current by remember { mutableStateOf<NavTab>(NavTab.Cards) }
+    var pendingPiggyAssetPlanId by remember { mutableStateOf<String?>(null) }
+    var allowHiddenCurrent by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     val themeMode by vm.themeMode.collectAsState()
     val systemDark = isSystemInDarkTheme()
@@ -125,8 +164,22 @@ fun CardManagerApp(vm: MainViewModel) {
             .ifEmpty { listOf(NavTab.Cards, NavTab.Data) }
     }
 
-    LaunchedEffect(visibleTabs) {
-        if (current !in visibleTabs) current = NavTab.Cards
+    LaunchedEffect(visibleTabs, current, allowHiddenCurrent) {
+        when {
+            current in visibleTabs -> if (allowHiddenCurrent) allowHiddenCurrent = false
+            !allowHiddenCurrent -> current = NavTab.Cards
+        }
+    }
+
+    LaunchedEffect(launchRequest, visibleTabs) {
+        val request = launchRequest ?: return@LaunchedEffect
+        val target = tabById(request.targetTab) ?: NavTab.Cards
+        current = target
+        allowHiddenCurrent = target !in visibleTabs
+        pendingPiggyAssetPlanId = request.assetPlanId.takeIf {
+            target == NavTab.Piggy && it.isNotBlank()
+        }
+        onLaunchRequestConsumed()
     }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -153,14 +206,18 @@ fun CardManagerApp(vm: MainViewModel) {
                     Scaffold(
                         contentWindowInsets = WindowInsets(0),
                         topBar = { AppTopBar(current, isDark) { showSettings = true } },
-                        bottomBar = { AppBottomBar(visibleTabs, current) { current = it } },
+                        bottomBar = { AppBottomBar(visibleTabs, current) { allowHiddenCurrent = false; current = it } },
                         containerColor = MaterialTheme.colorScheme.background
                     ) { padding ->
                         Box(Modifier.padding(padding).fillMaxSize()) {
                             when (current) {
                                 NavTab.Cards    -> CardsScreen(vm)
                                 NavTab.Calendar -> CalendarScreen(vm)
-                                NavTab.Piggy    -> PiggyScreen(vm)
+                                NavTab.Piggy    -> PiggyScreen(
+                                    vm = vm,
+                                    openAssetPlanId = pendingPiggyAssetPlanId,
+                                    onAssetPlanOpened = { pendingPiggyAssetPlanId = null }
+                                )
                                 NavTab.Data     -> DataScreen(vm)
                             }
                         }

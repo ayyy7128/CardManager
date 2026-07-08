@@ -4,4 +4,6 @@
     android:minHeight="110dp"
     android:updatePeriodMillis="3600000"
     android:initialLayout="@layout/widget_4x2"
+    android:configure="com.cardmanager.widget.CardWidgetConfigureActivity"
+    android:description="@string/widget_desc_4x2"
     android:widgetCategory="home_screen"/>

@@ -4,35 +4,61 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg"
     android:orientation="vertical"
-    android:padding="14dp"
-    android:gravity="center">
+    android:padding="14dp">
+
     <TextView
-        android:layout_width="wrap_content"
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="今日任务"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/widget_tasks_title"
         android:textColor="#AABBCC"
-        android:textSize="11sp"/>
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
     <TextView
-        android:id="@+id/tv_task_count"
-        android:layout_width="wrap_content"
+        android:id="@+id/widget_primary"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:ellipsize="end"
+        android:maxLines="1"
         android:text="0"
         android:textColor="#7DD3FC"
-        android:textSize="40sp"
-        android:textStyle="bold"
-        android:layout_marginTop="2dp"/>
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
     <TextView
-        android:layout_width="wrap_content"
+        android:id="@+id/widget_secondary"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="项"
-        android:textColor="#7DD3FC"
-        android:textSize="12sp"/>
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/widget_no_tasks"
+        android:textColor="#CBD5E1"
+        android:textSize="11sp" />
+
     <TextView
-        android:id="@+id/tv_date"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:id="@+id/widget_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="6dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="2"
         android:text=""
-        android:textColor="#506070"
-        android:textSize="10sp"
-        android:layout_marginTop="6dp"/>
+        android:textColor="#94A3B8"
+        android:textSize="10sp" />
+
+    <TextView
+        android:id="@+id/widget_meta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text=""
+        android:textColor="#64748B"
+        android:textSize="10sp" />
 </LinearLayout>

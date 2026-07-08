@@ -133,7 +133,11 @@ internal fun AssetOverlayHost(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PiggyScreen(vm: MainViewModel) {
+fun PiggyScreen(
+    vm: MainViewModel,
+    openAssetPlanId: String? = null,
+    onAssetPlanOpened: () -> Unit = {}
+) {
     val entries by vm.piggyEntries.collectAsState()
     val assetPlans by vm.assetPlans.collectAsState()
     val vaultCurrency by vm.vaultCurrency.collectAsState()
@@ -170,6 +174,20 @@ fun PiggyScreen(vm: MainViewModel) {
             snackMsg = null
         }
     }
+
+    LaunchedEffect(openAssetPlanId, assetPlans) {
+        val planId = openAssetPlanId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val plan = assetPlans.firstOrNull { it.id == planId }
+        if (plan != null) {
+            showAssetEditor = false
+            editingAsset = null
+            viewingAsset = plan
+            onAssetPlanOpened()
+        } else if (assetPlans.isNotEmpty()) {
+            onAssetPlanOpened()
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val pagePadding = screenPaddingFor(maxWidth)
