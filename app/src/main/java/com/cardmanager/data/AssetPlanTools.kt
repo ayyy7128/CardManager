@@ -67,10 +67,12 @@ object AssetCalculator {
             return AssetCalcResult(plan.frozenAmount, emptyList())
         }
         val logs = mutableListOf<AssetTransactionLog>()
-        var total = plan.initialCapital
-        if (plan.initialCapital > 0.0) {
+        val initialDateText = plan.initialDate.ifBlank { plan.startDate.ifBlank { today.toString() } }
+        val initialIsEffective = parseDate(initialDateText)?.isAfter(today) != true
+        var total = if (initialIsEffective) plan.initialCapital else 0.0
+        if (initialIsEffective && plan.initialCapital != 0.0) {
             logs += AssetTransactionLog(
-                date = plan.initialDate.ifBlank { plan.startDate.ifBlank { today.toString() } },
+                date = initialDateText,
                 amount = plan.initialCapital,
                 status = "初始资金",
                 currency = plan.currency,
@@ -181,7 +183,9 @@ object AssetCalculator {
             }
         }
 
-        AssetPlanCodec.decodeAdjustments(plan.adjustmentsJson).forEach { adj ->
+        AssetPlanCodec.decodeAdjustments(plan.adjustmentsJson)
+            .filterNot { parseDate(it.date)?.isAfter(today) == true }
+            .forEach { adj ->
             total += adj.amount
             logs += AssetTransactionLog(adj.date, adj.amount, "资金调整", plan.currency, AssetLogType.ADJUSTMENT, adj.note)
         }

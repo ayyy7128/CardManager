@@ -95,9 +95,9 @@
     <string name="note_optional">Note (optional)</string>
     <string name="pure_account">Account only</string>
     <string name="delete_group_title">Delete group?</string>
-    <string name="delete_group_body">Cards in this group, related tasks, asset records, and in-app images will also be deleted.</string>
+    <string name="delete_group_body">Cards in this group, related tasks, quick records, and in-app images will be deleted. Investment projects will be kept and unlinked.</string>
     <string name="delete_card_title">Delete card?</string>
-    <string name="delete_card_body">Related tasks, asset records, and in-app images will also be deleted.</string>
+    <string name="delete_card_body">Related tasks, quick records, and in-app images will be deleted. Investment projects will be kept and unlinked.</string>
     <string name="select_expiry">Select expiry</string>
     <string name="year_format">%1$d</string>
     <string name="confirm">Confirm</string>
@@ -235,7 +235,7 @@
     <string name="import_backup">Import backup</string>
     <string name="backup_success">Backup completed with images, fonts, and settings.</string>
     <string name="export_backup_options">Export backup</string>
-    <string name="backup_password_body">The backup is encrypted in CardManager\'s app-specific format. You can add an extra password.</string>
+    <string name="backup_password_body">New backups require a password, which is not stored by the app. Keep it safe; a forgotten password cannot be recovered.</string>
     <string name="backup_use_password">Protect with password</string>
     <string name="backup_password">Backup password</string>
     <string name="backup_password_optional">Backup password (optional)</string>
@@ -257,7 +257,7 @@
     <string name="font_reset_snackbar">Default font restored. Restart to apply it.</string>
     <string name="restore_default_font">Restore default font</string>
     <string name="about">About</string>
-    <string name="version_1">Version 2.2.0</string>
+    <string name="version_1">Version 2.2.1</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">Data stays on this device. Nothing is uploaded.</string>
     <string name="support_development">Support development</string>

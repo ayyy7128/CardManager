@@ -2,6 +2,7 @@ package com.cardmanager.widget
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -76,6 +77,15 @@ object CardWidgetUpdater {
         manager.updateAppWidget(appWidgetId, views)
     }
 
+    suspend fun updateAll(context: Context) {
+        val appContext = context.applicationContext
+        val manager = AppWidgetManager.getInstance(appContext)
+        val ids = listOf(CardWidget2x2Provider::class.java, CardWidget4x2Provider::class.java)
+            .flatMap { provider -> manager.getAppWidgetIds(ComponentName(appContext, provider)).asList() }
+            .distinct()
+        ids.forEach { updateWidget(appContext, manager, it) }
+    }
+
     private suspend fun buildViews(context: Context, appWidgetId: Int, config: Config, wide: Boolean): RemoteViews = withContext(Dispatchers.IO) {
         val layoutId = if (wide) R.layout.widget_4x2 else R.layout.widget_2x2
         val snapshot = loadSnapshot(context, config, wide)
@@ -108,17 +118,19 @@ object CardWidgetUpdater {
         val prefsCurrency = context.getSharedPreferences("cm_settings", Context.MODE_PRIVATE)
             .getString("vaultCurrency", "CNY")
         val vaultCurrency = ExchangeRateService.sanitizeCurrency(settingCurrency ?: prefsCurrency ?: "CNY")
+        val exchangeRates = ExchangeRateService.loadCachedRates(context)
 
         return when (config.mode) {
             MODE_VAULT_TOTAL -> {
                 val entries = db.piggyDao().getAllEntries().first()
                 val plans = db.assetPlanDao().getAllPlans().first()
-                vaultTotalSnapshot(context, entries, plans, vaultCurrency, wide)
+                vaultTotalSnapshot(context, entries, plans, vaultCurrency, exchangeRates, wide)
             }
             MODE_ASSET_PLAN -> {
                 val plans = db.assetPlanDao().getAllPlans().first()
-                val plan = plans.firstOrNull { it.id == config.planId } ?: plans.firstOrNull()
-                if (plan == null) emptyProjectSnapshot(context, vaultCurrency) else assetPlanSnapshot(context, plan, vaultCurrency, wide)
+                val plan = plans.firstOrNull { it.id == config.planId }
+                if (plan == null) emptyProjectSnapshot(context, vaultCurrency)
+                else assetPlanSnapshot(context, plan, vaultCurrency, exchangeRates, wide)
             }
             else -> {
                 val tasks = db.taskDao().getAllTasks().first()
@@ -166,15 +178,16 @@ object CardWidgetUpdater {
         entries: List<PiggyEntry>,
         plans: List<AssetPlan>,
         currency: String,
+        exchangeRates: Map<String, Double>,
         wide: Boolean
     ): WidgetSnapshot {
         val manualTotal = entries
             .filter { isManualPiggyEntry(it) }
-            .sumOf { ExchangeRateService.convert(it.amount, "CNY", currency, ExchangeRateService.fallbackRates) }
+            .sumOf { ExchangeRateService.convert(it.amount, "CNY", currency, exchangeRates) }
         val includedPlans = plans.filter { it.countInTotal }
         val planRows = includedPlans.map { plan ->
             val amount = assetPlanDisplayAmount(plan)
-            val converted = ExchangeRateService.convert(amount, plan.currency, currency, ExchangeRateService.fallbackRates)
+            val converted = ExchangeRateService.convert(amount, plan.currency, currency, exchangeRates)
             plan to converted
         }
         val total = manualTotal + planRows.sumOf { it.second }
@@ -193,14 +206,20 @@ object CardWidgetUpdater {
         )
     }
 
-    private fun assetPlanSnapshot(context: Context, plan: AssetPlan, vaultCurrency: String, wide: Boolean): WidgetSnapshot {
+    private fun assetPlanSnapshot(
+        context: Context,
+        plan: AssetPlan,
+        vaultCurrency: String,
+        exchangeRates: Map<String, Double>,
+        wide: Boolean
+    ): WidgetSnapshot {
         val calc = AssetCalculator.calc(plan, LocalDate.now())
         val amount = if (plan.status == AssetPlanStatus.STOPPED) {
             if (plan.countInTotal) plan.frozenAmount else 0.0
         } else {
             calc.amount
         }
-        val converted = ExchangeRateService.convert(amount, plan.currency, vaultCurrency, ExchangeRateService.fallbackRates)
+        val converted = ExchangeRateService.convert(amount, plan.currency, vaultCurrency, exchangeRates)
         val status = if (plan.status == AssetPlanStatus.STOPPED) {
             context.getString(R.string.widget_asset_archived)
         } else {

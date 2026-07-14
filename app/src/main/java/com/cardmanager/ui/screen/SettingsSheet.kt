@@ -111,7 +111,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val fontReset = stringResource(R.string.font_reset_snackbar)
     var savedFontName by remember { mutableStateOf("") }
     var showExportDialog by remember { mutableStateOf(false) }
-    var exportUsePassword by remember { mutableStateOf(false) }
     var exportPassword by remember { mutableStateOf("") }
     var pendingExportPassword by remember { mutableStateOf<String?>(null) }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -167,36 +166,28 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = {
                 showExportDialog = false
-                exportUsePassword = false
                 exportPassword = ""
             },
             title = { Text(stringResource(R.string.export_backup_options)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(stringResource(R.string.backup_password_body), fontSize = 13.sp)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = exportUsePassword, onCheckedChange = { exportUsePassword = it })
-                        Text(stringResource(R.string.backup_use_password), fontSize = 13.sp)
-                    }
-                    if (exportUsePassword) {
-                        OutlinedTextField(
-                            value = exportPassword,
-                            onValueChange = { exportPassword = it },
-                            label = { Text(stringResource(R.string.backup_password)) },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                    OutlinedTextField(
+                        value = exportPassword,
+                        onValueChange = { exportPassword = it },
+                        label = { Text(stringResource(R.string.backup_password)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             },
             confirmButton = {
                 TextButton(
-                    enabled = !exportUsePassword || exportPassword.isNotBlank(),
+                    enabled = exportPassword.isNotBlank(),
                     onClick = {
-                        pendingExportPassword = if (exportUsePassword) exportPassword else null
+                        pendingExportPassword = exportPassword
                         exportPassword = ""
-                        exportUsePassword = false
                         showExportDialog = false
                         exportLauncher.launch(ctx.getString(R.string.backup_file_name, LocalDate.now().toString()))
                     }
@@ -205,7 +196,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             dismissButton = {
                 TextButton(onClick = {
                     showExportDialog = false
-                    exportUsePassword = false
                     exportPassword = ""
                 }) { Text(stringResource(R.string.cancel)) }
             }

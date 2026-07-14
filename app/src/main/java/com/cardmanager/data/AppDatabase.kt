@@ -12,7 +12,7 @@ import java.io.File
 @Database(
     entities = [CardGroup::class, Card::class, Task::class, PiggyEntry::class, AssetPlan::class, AppSetting::class],
     version = 12,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun groupDao(): CardGroupDao
@@ -237,6 +237,11 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     private val encryptedBackupMagic = "CMBKENC2".toByteArray(Charsets.US_ASCII)
     private val legacyEncryptedBackupMagic = "CMBKENC1".toByteArray(Charsets.US_ASCII)
     private val passwordBackupFlag = 1
+    private val maxBackupBytes = 128 * 1024 * 1024
+    private val maxJsonBytes = 16 * 1024 * 1024
+    private val maxImageBytes = 32 * 1024 * 1024
+    private val maxFontBytes = 16 * 1024 * 1024
+    private val maxExtractedBytes = 192 * 1024 * 1024
     private val exportedSettingKeys = setOf(
         "theme",
         "vaultCurrency",
@@ -269,6 +274,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             groupCards.forEach { card ->
                 db.taskDao().deleteForCard(card.id)
                 db.piggyDao().deleteForCard(card.id)
+                db.assetPlanDao().unlinkCard(card.id)
                 db.cardDao().delete(card)
             }
             db.groupDao().delete(g)
@@ -282,6 +288,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         db.withTransaction {
             db.taskDao().deleteForCard(c.id)
             db.piggyDao().deleteForCard(c.id)
+            db.assetPlanDao().unlinkCard(c.id)
             db.cardDao().delete(c)
         }
         deleteImagesIfOwned(c)
@@ -373,12 +380,13 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     }
 
     private fun encryptBackup(plainBytes: ByteArray, password: String?): ByteArray {
-        val hasPassword = !password.isNullOrBlank()
-        val flags = if (hasPassword) passwordBackupFlag else 0
-        val salt = if (hasPassword) ByteArray(16).also { java.security.SecureRandom().nextBytes(it) } else ByteArray(0)
+        val pass = password?.takeIf { it.isNotBlank() }
+            ?: throw Exception("请设置备份密码")
+        val flags = passwordBackupFlag
+        val salt = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
         val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
         val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-        val key = if (hasPassword) passwordBackupKey(password.orEmpty(), salt) else appBackupKey()
+        val key = passwordBackupKey(pass, salt)
         val header = java.io.ByteArrayOutputStream().use { out ->
             out.write(encryptedBackupMagic)
             out.write(flags)
@@ -429,7 +437,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 ?: throw Exception("此备份已设置密码，请输入备份密码")
             passwordBackupKey(pass, salt)
         } else {
-            appBackupKey()
+            legacyAppBackupKey()
         }
         val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
@@ -447,7 +455,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         val iv = encryptedBytes.copyOfRange(ivStart, ivEnd)
         val cipherBytes = encryptedBytes.copyOfRange(ivEnd, encryptedBytes.size)
         val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, appBackupKey(), javax.crypto.spec.GCMParameterSpec(128, iv))
+        cipher.init(javax.crypto.Cipher.DECRYPT_MODE, legacyAppBackupKey(), javax.crypto.spec.GCMParameterSpec(128, iv))
         cipher.updateAAD(legacyEncryptedBackupMagic)
         return runCatching { cipher.doFinal(cipherBytes) }
             .getOrElse { throw Exception("备份文件已损坏", it) }
@@ -459,7 +467,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     private fun hasMagic(bytes: ByteArray, magic: ByteArray): Boolean =
         bytes.size >= magic.size && magic.indices.all { bytes[it] == magic[it] }
 
-    private fun appBackupKey(): javax.crypto.SecretKey {
+    private fun legacyAppBackupKey(): javax.crypto.SecretKey {
         val material = "CardManager.local.encrypted.backup.v1.ayyy.codex".toByteArray(Charsets.UTF_8)
         val keyBytes = java.security.MessageDigest.getInstance("SHA-256").digest(material)
         return javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
@@ -502,7 +510,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
     private fun buildZipJson(grps: List<CardGroup>, cds: List<Card>,
                              tsks: List<Task>, pig: List<PiggyEntry>, plans: List<AssetPlan>,
                              settings: List<AppSetting>): String {
-        fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+        fun esc(s: String) = jsonEscape(s)
         val sb = StringBuilder("{\"version\":2")
         sb.append(",\"groups\":[${grps.joinToString(",") { g ->
             "{\"id\":\"${g.id}\",\"name\":\"${esc(g.name)}\",\"icon\":\"${g.icon}\",\"isOpen\":${g.isOpen},\"order\":${g.sortOrder}}"
@@ -560,6 +568,15 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             "导入成功：${groupCount} 个分组、${cardCount} 张卡、${taskCount} 个任务、${pigCount} 条记录、${assetPlanCount} 个投资任务"
     }
 
+    private data class ParsedBackup(
+        val groups: List<CardGroup>,
+        val cards: List<Card>,
+        val tasks: List<Task>,
+        val piggyEntries: List<PiggyEntry>,
+        val assetPlans: List<AssetPlan>,
+        val settings: List<AppSetting>
+    )
+
     suspend fun importBackup(
         ctx: android.content.Context,
         uri: android.net.Uri,
@@ -571,9 +588,13 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         val imageMap = mutableMapOf<String, ByteArray>()
         val importedFontFile = java.io.File(ctx.filesDir, "custom_font.ttf")
         var importedFontName: String? = null
-        var hasImportedFontFile = false
+        var importedFontBytes: ByteArray? = null
+        var hasFontMeta = false
+        var extractedBytes = 0L
 
-        val rawBytes = ctx.contentResolver.openInputStream(uri)?.buffered()?.use { it.readBytes() }
+        val rawBytes = ctx.contentResolver.openInputStream(uri)?.buffered()?.use {
+            readBytesLimited(it, maxBackupBytes, "备份文件")
+        }
             ?: throw Exception("无法读取备份文件")
         if (!isEncryptedBackup(rawBytes)) {
             throw Exception("请选择 .cmbak 加密备份文件")
@@ -586,182 +607,355 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 while (entry != null) {
                     if (!entry.isDirectory) {
                         when {
-                            entry.name == "data.json" ->
-                                jsonStr = zip.readBytes().toString(Charsets.UTF_8)
+                            entry.name == "data.json" -> {
+                                if (jsonStr != null) throw Exception("备份文件格式错误：包含重复的 data.json")
+                                val bytes = readBytesLimited(zip, maxJsonBytes, "data.json")
+                                extractedBytes += bytes.size
+                                jsonStr = bytes.toString(Charsets.UTF_8)
+                            }
                             entry.name.startsWith("images/") -> {
                                 val name = entry.name.removePrefix("images/")
-                                if (name.isNotEmpty()) imageMap[name] = zip.readBytes()
+                                val target = safeChildFile(imgDir, name)
+                                    ?: throw Exception("备份文件包含无效图片路径")
+                                if (target.name in imageMap) throw Exception("备份文件包含重复图片：${target.name}")
+                                val bytes = readBytesLimited(zip, maxImageBytes, "图片 ${target.name}")
+                                extractedBytes += bytes.size
+                                imageMap[target.name] = bytes
                             }
                             entry.name == "fonts/custom_font.ttf" -> {
-                                val bytes = zip.readBytes()
-                                importedFontFile.writeBytes(bytes)
-                                hasImportedFontFile = true
+                                if (importedFontBytes != null) throw Exception("备份文件包含重复的自定义字体")
+                                val bytes = readBytesLimited(zip, maxFontBytes, "自定义字体")
+                                extractedBytes += bytes.size
+                                importedFontBytes = bytes
                             }
                             entry.name == "fonts/font_meta.txt" -> {
-                                val fontName = zip.readBytes().toString(Charsets.UTF_8)
+                                if (hasFontMeta) throw Exception("备份文件包含重复的字体信息")
+                                val bytes = readBytesLimited(zip, 16 * 1024, "字体信息")
+                                extractedBytes += bytes.size
+                                val fontName = bytes.toString(Charsets.UTF_8)
                                 importedFontName = fontName
+                                hasFontMeta = true
                             }
                         }
+                        if (extractedBytes > maxExtractedBytes.toLong()) {
+                            throw Exception("备份文件解压后过大")
+                        }
                     }
-                    zip.closeEntry(); entry = zip.nextEntry
+                    zip.closeEntry()
+                    entry = zip.nextEntry
                 }
             }
-        }
-
-        if (mode == ImportMode.OVERWRITE) {
-            val oldCards = cards.first()
-            db.withTransaction {
-                db.taskDao().deleteAll()
-                db.piggyDao().deleteAll()
-                db.assetPlanDao().deleteAll()
-                db.cardDao().deleteAll()
-                db.groupDao().deleteAll()
-            }
-            oldCards.forEach { deleteImagesIfOwned(it) }
-            if (!hasImportedFontFile) {
-                importedFontFile.delete()
-                ctx.getSharedPreferences("cm_font", android.content.Context.MODE_PRIVATE)
-                    .edit().clear().apply()
-                db.settingDao().set(AppSetting("custom_font_path", ""))
-                db.settingDao().set(AppSetting("custom_font_name", ""))
-            }
-        }
-
-        val restoredFontName = importedFontName
-        if (hasImportedFontFile && restoredFontName != null) {
-            ctx.getSharedPreferences("cm_font", android.content.Context.MODE_PRIVATE)
-                .edit()
-                .putString("font_path", importedFontFile.absolutePath)
-                .putString("font_name", restoredFontName)
-                .apply()
-            db.settingDao().set(AppSetting("custom_font_path", importedFontFile.absolutePath))
-            db.settingDao().set(AppSetting("custom_font_name", restoredFontName))
-        }
-
-        // 解压图片
-        imageMap.forEach { (name, bytes) ->
-            safeChildFile(imgDir, name)?.writeBytes(bytes)
         }
 
         val root = org.json.JSONObject(
             jsonStr ?: throw Exception("备份文件格式错误：未找到 data.json"))
+        val restoredFontName = importedFontName?.trim()?.takeIf { it.isNotBlank() }
+        val hasImportedFontFile = importedFontBytes != null && restoredFontName != null
+        val parsed = parseBackupPayload(
+            root = root,
+            imageDir = imgDir,
+            imageNames = imageMap.keys,
+            hasImportedFontFile = hasImportedFontFile,
+            importedFontFile = importedFontFile,
+            restoredFontName = restoredFontName
+        )
 
-        importSettings(ctx, root.optJSONArray("settings"), hasImportedFontFile, importedFontFile, restoredFontName)
+        val stagingDir = java.io.File(ctx.cacheDir, "backup_import_${java.util.UUID.randomUUID()}")
+        val stagingImages = java.io.File(stagingDir, "images").also { it.mkdirs() }
+        val stagedFont = java.io.File(stagingDir, "custom_font.ttf")
+        try {
+            imageMap.forEach { (name, bytes) ->
+                safeChildFile(stagingImages, name)?.writeBytes(bytes)
+                    ?: throw Exception("备份文件包含无效图片路径")
+            }
+            importedFontBytes?.let { stagedFont.writeBytes(it) }
 
-        // Groups
-        val grpsArr = root.optJSONArray("groups") ?: org.json.JSONArray()
-        for (i in 0 until grpsArr.length()) {
-            val g = grpsArr.getJSONObject(i)
-            db.groupDao().insert(CardGroup(
-                id = g.getString("id"), name = g.getString("name"),
-                icon = g.optString("icon", "💳"),
-                isOpen = g.optBoolean("isOpen", true),
-                sortOrder = g.optInt("order", i)))
+            val oldCards = if (mode == ImportMode.OVERWRITE) cards.first() else emptyList()
+            db.withTransaction {
+                if (mode == ImportMode.OVERWRITE) {
+                    db.taskDao().deleteAll()
+                    db.piggyDao().deleteAll()
+                    db.assetPlanDao().deleteAll()
+                    db.cardDao().deleteAll()
+                    db.groupDao().deleteAll()
+                }
+                parsed.groups.forEach { db.groupDao().insert(it) }
+                parsed.cards.forEach { db.cardDao().insert(it) }
+                parsed.tasks.forEach { db.taskDao().insert(it) }
+                parsed.piggyEntries.forEach { db.piggyDao().insert(it) }
+                parsed.assetPlans.forEach { db.assetPlanDao().insert(it) }
+                parsed.settings.forEach { db.settingDao().set(it) }
+                if (mode == ImportMode.OVERWRITE && !hasImportedFontFile) {
+                    db.settingDao().set(AppSetting("custom_font_path", ""))
+                    db.settingDao().set(AppSetting("custom_font_name", ""))
+                }
+            }
+
+            imageMap.keys.forEach { name ->
+                val source = safeChildFile(stagingImages, name)
+                    ?: throw Exception("备份文件包含无效图片路径")
+                val target = safeChildFile(imgDir, name)
+                    ?: throw Exception("备份文件包含无效图片路径")
+                source.copyTo(target, overwrite = true)
+            }
+            if (hasImportedFontFile) {
+                stagedFont.copyTo(importedFontFile, overwrite = true)
+            } else if (mode == ImportMode.OVERWRITE) {
+                importedFontFile.delete()
+            }
+
+            val importedPaths = parsed.cards
+                .flatMap { listOf(it.logoImagePath, it.bankLogoPath) }
+                .filter { it.isNotBlank() }
+                .toSet()
+            oldCards.flatMap { listOf(it.logoImagePath, it.bankLogoPath) }
+                .filter { it.isNotBlank() && it !in importedPaths }
+                .forEach { ImageStore.deleteOwned(ctx, it) }
+
+            applyImportedPreferences(
+                ctx = ctx,
+                settings = parsed.settings,
+                hasImportedFontFile = hasImportedFontFile,
+                importedFontFile = importedFontFile,
+                restoredFontName = restoredFontName,
+                overwrite = mode == ImportMode.OVERWRITE
+            )
+
+            return ImportSummary(
+                groupCount = parsed.groups.size,
+                cardCount = parsed.cards.size,
+                taskCount = parsed.tasks.size,
+                pigCount = parsed.piggyEntries.size,
+                assetPlanCount = parsed.assetPlans.size
+            )
+        } finally {
+            stagingDir.deleteRecursively()
+        }
+    }
+
+    private fun parseBackupPayload(
+        root: org.json.JSONObject,
+        imageDir: File,
+        imageNames: Set<String>,
+        hasImportedFontFile: Boolean,
+        importedFontFile: File,
+        restoredFontName: String?
+    ): ParsedBackup {
+        val parsedGroups = mutableListOf<CardGroup>()
+        val groupsArray = root.optJSONArray("groups") ?: org.json.JSONArray()
+        for (i in 0 until groupsArray.length()) {
+            val item = groupsArray.getJSONObject(i)
+            parsedGroups += CardGroup(
+                id = item.getString("id"),
+                name = item.getString("name"),
+                icon = item.optString("icon", "💳"),
+                isOpen = item.optBoolean("isOpen", true),
+                sortOrder = item.optInt("order", i)
+            )
         }
 
-        // Cards
-        val cdsArr = root.optJSONArray("cards") ?: org.json.JSONArray()
-        for (i in 0 until cdsArr.length()) {
-            val c = cdsArr.getJSONObject(i)
-            val lf = c.optString("logoFile", "")
-            val bf = c.optString("bankLogoFile", "")
-            db.cardDao().insert(Card(
-                id = c.getString("id"), groupId = c.getString("gid"),
-                bank = c.getString("bank"), network = c.optString("network", "银联"),
-                currency = c.optString("currency", "CNY"), tail = c.optString("tail", ""),
-                role = c.optString("role", ""), note = c.optString("note", ""),
-                status = c.optString("status", "active"),
-                isVirtual = c.optBoolean("isVirtual", false),
-                noCard = c.optBoolean("noCard", false),
-                logoEmoji = c.optString("logo", ""),
-                logoImagePath = safeImportedImagePath(imgDir, lf),
-                bankLogoPath  = safeImportedImagePath(imgDir, bf),
-                cardTypeName  = c.optString("cardTypeName", ""),
-                expiryDate    = c.optString("expiryDate", ""),
-                cardCategory  = c.optString("cardCategory", ""),
-                sortOrder = c.optInt("order", i),
-                imageOrientation = normalizedOrientation(c.optString("imageOrientation", "horizontal")),
-                creditLimit = c.optDouble("creditLimit", 0.0).coerceAtLeast(0.0),
-                billingDay = c.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0,
-                repaymentDay = c.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0))
+        val parsedCards = mutableListOf<Card>()
+        val cardsArray = root.optJSONArray("cards") ?: org.json.JSONArray()
+        for (i in 0 until cardsArray.length()) {
+            val item = cardsArray.getJSONObject(i)
+            val creditLimit = requireFinite(item.optDouble("creditLimit", 0.0), "信用卡额度")
+            parsedCards += Card(
+                id = item.getString("id"),
+                groupId = item.getString("gid"),
+                bank = item.getString("bank"),
+                network = item.optString("network", "银联"),
+                currency = item.optString("currency", "CNY"),
+                tail = item.optString("tail", ""),
+                role = item.optString("role", ""),
+                note = item.optString("note", ""),
+                status = item.optString("status", "active"),
+                isVirtual = item.optBoolean("isVirtual", false),
+                noCard = item.optBoolean("noCard", false),
+                logoEmoji = item.optString("logo", ""),
+                logoImagePath = importedImagePath(imageDir, item.optString("logoFile", ""), imageNames),
+                bankLogoPath = importedImagePath(imageDir, item.optString("bankLogoFile", ""), imageNames),
+                cardTypeName = item.optString("cardTypeName", ""),
+                expiryDate = item.optString("expiryDate", ""),
+                cardCategory = item.optString("cardCategory", ""),
+                sortOrder = item.optInt("order", i),
+                imageOrientation = normalizedOrientation(item.optString("imageOrientation", "horizontal")),
+                creditLimit = creditLimit.coerceAtLeast(0.0),
+                billingDay = item.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0,
+                repaymentDay = item.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0
+            )
         }
 
-        // Tasks
-        var taskCount = 0
-        fun parseTask(t: org.json.JSONObject) = Task(
-            id = t.optString("id").ifEmpty { java.util.UUID.randomUUID().toString() },
-            name = t.optString("name", "未命名"), freq = t.getString("freq"),
-            cardId = t.optString("cardId", ""),
-            isInvest = t.optBoolean("isInvest", false),
-            investAmount = t.optDouble("investAmount", 0.0),
-            day = t.optInt("day", 1), weekday = t.optInt("weekday", 1),
-            months = t.optString("months", ""), ndays = t.optInt("ndays", 7).coerceAtLeast(1),
-            startDate = t.optString("startDate", ""), date = t.optString("date", ""),
-            holidays = t.optString("holidays", ""))
-        listOf("monthlyTasks","weeklyTasks","quarterlyTasks","ndaysTasks","onceTasks").forEach { key ->
-            val arr = root.optJSONArray(key) ?: return@forEach
-            for (i in 0 until arr.length()) {
-                val task = parseTask(arr.getJSONObject(i))
+        val parsedTasks = mutableListOf<Task>()
+        val legacyAssetPlans = mutableListOf<AssetPlan>()
+        fun parseTask(item: org.json.JSONObject): Task {
+            val investAmount = requireFinite(item.optDouble("investAmount", 0.0), "任务金额")
+            return Task(
+                id = item.optString("id").ifEmpty { java.util.UUID.randomUUID().toString() },
+                name = item.optString("name", "未命名"),
+                freq = item.getString("freq"),
+                cardId = item.optString("cardId", ""),
+                isInvest = item.optBoolean("isInvest", false),
+                investAmount = investAmount,
+                day = item.optInt("day", 1),
+                weekday = item.optInt("weekday", 1),
+                months = item.optString("months", ""),
+                ndays = item.optInt("ndays", 7).coerceAtLeast(1),
+                startDate = item.optString("startDate", ""),
+                date = item.optString("date", ""),
+                holidays = item.optString("holidays", "")
+            )
+        }
+        listOf("monthlyTasks", "weeklyTasks", "quarterlyTasks", "ndaysTasks", "onceTasks").forEach { key ->
+            val array = root.optJSONArray(key) ?: return@forEach
+            for (i in 0 until array.length()) {
+                val task = parseTask(array.getJSONObject(i))
                 if (task.isInvest && kotlin.math.abs(task.investAmount) > 0.0) {
-                    db.assetPlanDao().insert(assetPlanFromTask(task, i))
+                    legacyAssetPlans += assetPlanFromTask(task, i)
                 } else if (!task.isInvest) {
-                    db.taskDao().insert(task)
-                    taskCount++
+                    parsedTasks += task
                 }
             }
         }
 
-        // Piggy
-        val pigArr = root.optJSONArray("pig") ?: org.json.JSONArray()
-        for (i in 0 until pigArr.length()) {
-            val e = pigArr.getJSONObject(i)
-            db.piggyDao().insert(PiggyEntry(
-                id = e.getLong("id"), amount = e.getDouble("amount"),
-                desc = e.optString("desc", ""), cardId = e.optString("cardId", ""),
-                date = e.getString("date"), timestamp = e.optLong("ts", e.getLong("id"))))
+        val parsedPiggyEntries = mutableListOf<PiggyEntry>()
+        val piggyArray = root.optJSONArray("pig") ?: org.json.JSONArray()
+        for (i in 0 until piggyArray.length()) {
+            val item = piggyArray.getJSONObject(i)
+            parsedPiggyEntries += PiggyEntry(
+                id = item.getLong("id"),
+                amount = requireFinite(item.getDouble("amount"), "小金库金额"),
+                desc = item.optString("desc", ""),
+                cardId = item.optString("cardId", ""),
+                date = item.getString("date"),
+                timestamp = item.optLong("ts", item.getLong("id"))
+            )
         }
 
-        val assetArr = root.optJSONArray("assetPlans") ?: org.json.JSONArray()
-        for (i in 0 until assetArr.length()) {
-            db.assetPlanDao().insert(parseAssetPlan(assetArr.getJSONObject(i), i))
+        val parsedAssetPlans = legacyAssetPlans.toMutableList()
+        val assetArray = root.optJSONArray("assetPlans") ?: org.json.JSONArray()
+        for (i in 0 until assetArray.length()) {
+            val plan = parseAssetPlan(assetArray.getJSONObject(i), i)
+            validateAssetPlan(plan)
+            parsedAssetPlans += plan
         }
 
-        return ImportSummary(grpsArr.length(), cdsArr.length(), taskCount, pigArr.length(), assetArr.length())
+        ensureUniqueIds(parsedGroups, CardGroup::id, "分组")
+        ensureUniqueIds(parsedCards, Card::id, "卡片")
+        ensureUniqueIds(parsedTasks, Task::id, "任务")
+        ensureUniqueIds(parsedPiggyEntries, { it.id.toString() }, "小金库记录")
+        ensureUniqueIds(parsedAssetPlans, AssetPlan::id, "投资项目")
+
+        val settingsByKey = linkedMapOf<String, AppSetting>()
+        val settingsArray = root.optJSONArray("settings")
+        if (settingsArray != null) {
+            for (i in 0 until settingsArray.length()) {
+                val item = settingsArray.optJSONObject(i) ?: continue
+                val key = item.optString("key", "")
+                if (key !in exportedSettingKeys || key == "custom_font_path") continue
+                var value = item.optString("value", "")
+                if (key == "custom_font_name") {
+                    if (!hasImportedFontFile || restoredFontName == null) continue
+                    value = restoredFontName
+                }
+                settingsByKey[key] = AppSetting(key, value)
+            }
+        }
+        if (hasImportedFontFile && restoredFontName != null) {
+            settingsByKey["custom_font_path"] = AppSetting("custom_font_path", importedFontFile.absolutePath)
+            settingsByKey["custom_font_name"] = AppSetting("custom_font_name", restoredFontName)
+        }
+
+        return ParsedBackup(
+            groups = parsedGroups,
+            cards = parsedCards,
+            tasks = parsedTasks,
+            piggyEntries = parsedPiggyEntries,
+            assetPlans = parsedAssetPlans,
+            settings = settingsByKey.values.toList()
+        )
     }
 
-    private suspend fun importSettings(
-        ctx: android.content.Context,
-        settingsArr: org.json.JSONArray?,
+    private fun applyImportedPreferences(
+        ctx: Context,
+        settings: List<AppSetting>,
         hasImportedFontFile: Boolean,
         importedFontFile: File,
-        restoredFontName: String?
+        restoredFontName: String?,
+        overwrite: Boolean
     ) {
-        if (settingsArr == null) return
-        val prefsEdit = ctx.getSharedPreferences("cm_settings", android.content.Context.MODE_PRIVATE).edit()
-        for (i in 0 until settingsArr.length()) {
-            val item = settingsArr.optJSONObject(i) ?: continue
-            val key = item.optString("key", "")
-            if (key !in exportedSettingKeys || key == "custom_font_path") continue
-            var value = item.optString("value", "")
-            if (key == "custom_font_name") {
-                if (!hasImportedFontFile || restoredFontName.isNullOrBlank()) continue
-                value = restoredFontName
+        val settingsEdit = ctx.getSharedPreferences("cm_settings", Context.MODE_PRIVATE).edit()
+        settings.filter { it.key != "custom_font_path" }.forEach {
+            settingsEdit.putString(it.key, it.value)
+        }
+        settingsEdit.apply()
+
+        val fontEdit = ctx.getSharedPreferences("cm_font", Context.MODE_PRIVATE).edit()
+        if (hasImportedFontFile && restoredFontName != null) {
+            fontEdit
+                .putString("font_path", importedFontFile.absolutePath)
+                .putString("font_name", restoredFontName)
+                .apply()
+        } else if (overwrite) {
+            fontEdit.clear().apply()
+        }
+    }
+
+    private fun readBytesLimited(input: java.io.InputStream, maxBytes: Int, label: String): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            total += count
+            if (total > maxBytes) throw Exception("${label}过大")
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
+    }
+
+    private fun <T> ensureUniqueIds(items: List<T>, id: (T) -> String, label: String) {
+        val seen = mutableSetOf<String>()
+        items.forEach { item ->
+            val value = id(item)
+            if (value.isBlank() || !seen.add(value)) throw Exception("备份文件包含无效或重复的${label} ID")
+        }
+    }
+
+    private fun requireFinite(value: Double, label: String): Double {
+        if (!value.isFinite()) throw Exception("备份文件中的${label}无效")
+        return value
+    }
+
+    private fun validateAssetPlan(plan: AssetPlan) {
+        requireFinite(plan.initialCapital, "投资项目初始金额")
+        requireFinite(plan.frozenAmount, "投资项目归档金额")
+        validateAssetArray("定投计划", plan.ratePlansJson, amountRequired = true)
+        validateAssetArray("旧暂停区间", plan.pauseRangesJson, amountRequired = false)
+        validateAssetArray("资金调整", plan.adjustmentsJson, amountRequired = true)
+        validateAssetArray("流水覆盖", plan.overridesJson, amountRequired = true)
+    }
+
+    private fun validateAssetArray(label: String, raw: String, amountRequired: Boolean) {
+        try {
+            val array = org.json.JSONArray(raw.ifBlank { "[]" })
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i)
+                    ?: throw Exception("${label}第 ${i + 1} 项不是对象")
+                if (amountRequired) {
+                    requireFinite(item.getDouble("amount"), "${label}第 ${i + 1} 项金额")
+                }
             }
-            db.settingDao().set(AppSetting(key, value))
-            prefsEdit.putString(key, value)
+        } catch (error: Exception) {
+            throw Exception("备份文件中的${label}数据无效", error)
         }
-        if (hasImportedFontFile && !restoredFontName.isNullOrBlank()) {
-            db.settingDao().set(AppSetting("custom_font_path", importedFontFile.absolutePath))
-            db.settingDao().set(AppSetting("custom_font_name", restoredFontName))
-        }
-        prefsEdit.apply()
     }
 
     suspend fun exportData(): String {
         val grps = groups.first(); val cds = cards.first()
         val tsks = tasks.first().filterNot { it.isInvest }; val pig = piggyEntries.first()
         val plans = assetPlans.first()
-        fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+        fun esc(s: String) = jsonEscape(s)
         val sb = StringBuilder("{")
         sb.append("\"groups\":[${grps.joinToString(",") { g -> "{\"id\":\"${g.id}\",\"name\":\"${esc(g.name)}\",\"icon\":\"${g.icon}\",\"isOpen\":${g.isOpen},\"order\":${g.sortOrder}}" }}]")
         sb.append(",\"cards\":[${cds.joinToString(",") { c -> "{\"id\":\"${c.id}\",\"gid\":\"${c.groupId}\",\"bank\":\"${esc(c.bank)}\",\"network\":\"${c.network}\",\"currency\":\"${c.currency}\",\"tail\":\"${c.tail}\",\"role\":\"${esc(c.role)}\",\"note\":\"${esc(c.note)}\",\"status\":\"${c.status}\",\"isVirtual\":${c.isVirtual},\"noCard\":${c.noCard},\"logo\":\"${c.logoEmoji}\",\"order\":${c.sortOrder},\"expiryDate\":\"${esc(c.expiryDate)}\",\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\",\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay}}" }}]")
@@ -867,9 +1061,14 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         return if (file.path.startsWith(base.path + File.separator)) file else null
     }
 
-    private fun safeImportedImagePath(parent: File, name: String): String =
-        safeChildFile(parent, name)?.takeIf { it.exists() }?.absolutePath ?: ""
+    private fun importedImagePath(parent: File, name: String, availableNames: Set<String>): String =
+        safeChildFile(parent, name)?.takeIf { it.name in availableNames }?.absolutePath ?: ""
 
     private fun normalizedOrientation(value: String): String =
         if (value == "vertical") "vertical" else "horizontal"
+
+    private fun jsonEscape(value: String): String {
+        val quoted = org.json.JSONObject.quote(value)
+        return quoted.substring(1, quoted.length - 1)
+    }
 }

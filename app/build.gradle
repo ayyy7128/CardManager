@@ -12,8 +12,8 @@ android {
         applicationId "com.cardmanager"
         minSdk 26
         targetSdk 34
-        versionCode 29
-        versionName "2.2.0"
+        versionCode 30
+        versionName "2.2.1"
     }
 
     buildTypes {
@@ -34,6 +34,10 @@ android {
 
     buildFeatures { compose true }
     composeOptions { kotlinCompilerExtensionVersion '1.5.8' }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -59,4 +63,7 @@ dependencies {
     ksp "androidx.room:room-compiler:$room_version"
 
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

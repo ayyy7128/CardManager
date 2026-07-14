@@ -112,6 +112,9 @@ interface AssetPlanDao {
     @Delete
     suspend fun delete(plan: AssetPlan)
 
+    @Query("UPDATE asset_plans SET cardId = '' WHERE cardId = :cardId")
+    suspend fun unlinkCard(cardId: String)
+
     @Query("DELETE FROM asset_plans")
     suspend fun deleteAll()
 }

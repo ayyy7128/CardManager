@@ -1,5 +1,6 @@
 package com.cardmanager.data
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -8,6 +9,10 @@ import java.net.URL
 import java.util.Locale
 
 object ExchangeRateService {
+    private const val PREFS = "cm_exchange_rates"
+    private const val KEY_RATES = "rates"
+    private const val KEY_UPDATED_AT = "updatedAt"
+
     val supportedCurrencies = listOf("CNY", "HKD", "USD")
     val fallbackRates = mapOf(
         "CNY" to 1.0,
@@ -15,18 +20,53 @@ object ExchangeRateService {
         "USD" to 0.14
     )
 
-    suspend fun fetchRates(): Map<String, Double> = withContext(Dispatchers.IO) {
+    suspend fun fetchRates(): Map<String, Double>? = withContext(Dispatchers.IO) {
         runCatching {
             val conn = (URL("https://open.er-api.com/v6/latest/CNY").openConnection() as HttpURLConnection).apply {
                 connectTimeout = 3000
                 readTimeout = 3000
             }
-            val raw = conn.inputStream.bufferedReader().use { it.readText() }
-            val rates = JSONObject(raw).getJSONObject("rates")
+            try {
+                val raw = conn.inputStream.bufferedReader().use { it.readText() }
+                val rates = JSONObject(raw).getJSONObject("rates")
+                supportedCurrencies.associateWith { currency ->
+                    val value = if (currency == "CNY") 1.0 else rates.getDouble(currency)
+                    require(value.isFinite() && value > 0.0)
+                    value
+                }
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrNull()
+    }
+
+    fun loadCachedRates(context: Context): Map<String, Double> {
+        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_RATES, "")
+            .orEmpty()
+        return runCatching {
+            val json = JSONObject(raw)
             supportedCurrencies.associateWith { currency ->
-                if (currency == "CNY") 1.0 else rates.optDouble(currency, fallbackRates[currency] ?: 1.0)
+                val value = json.getDouble(currency)
+                require(value.isFinite() && value > 0.0)
+                value
             }
         }.getOrDefault(fallbackRates)
+    }
+
+    fun saveCachedRates(context: Context, rates: Map<String, Double>) {
+        val safeRates = supportedCurrencies.associateWith { currency ->
+            rates[currency]?.takeIf { it.isFinite() && it > 0.0 }
+                ?: fallbackRates.getValue(currency)
+        }
+        val json = JSONObject().apply {
+            safeRates.forEach { (currency, value) -> put(currency, value) }
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_RATES, json.toString())
+            .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
+            .apply()
     }
 
     fun sanitizeCurrency(value: String): String =

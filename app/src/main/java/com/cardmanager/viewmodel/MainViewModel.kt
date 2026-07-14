@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.cardmanager.R
 import com.cardmanager.data.*
+import com.cardmanager.widget.CardWidgetUpdater
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -51,7 +52,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val piggyTaskSyncRules: StateFlow<Map<String, PiggyTaskSyncRule>> = _piggyTaskSyncRules
     private val _vaultCurrency = MutableStateFlow(ExchangeRateService.sanitizeCurrency(prefs.getString("vaultCurrency", "CNY") ?: "CNY"))
     val vaultCurrency: StateFlow<String> = _vaultCurrency
-    private val _exchangeRates = MutableStateFlow(ExchangeRateService.fallbackRates)
+    private val _exchangeRates = MutableStateFlow(ExchangeRateService.loadCachedRates(app))
     val exchangeRates: StateFlow<Map<String, Double>> = _exchangeRates
     private val _preferHighRefreshRate = MutableStateFlow(prefs.getString("preferHighRefreshRate", "false").toBoolean())
     val preferHighRefreshRate: StateFlow<Boolean> = _preferHighRefreshRate
@@ -144,6 +145,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _dataOverviewOrder.value = dataOverviewOrder
             _vaultCurrency.value = vaultCurrency
             _preferHighRefreshRate.value = preferHighRefreshRate
+            refreshWidgetsNow()
             refreshExchangeRates()
         }
         viewModelScope.launch {
@@ -233,6 +235,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _vaultCurrency.value = safe
             prefs.edit().putString("vaultCurrency", safe).apply()
             repo.setSetting("vaultCurrency", safe)
+            refreshWidgetsNow()
             refreshExchangeRates()
         }
     }
@@ -245,7 +248,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshExchangeRates() {
         viewModelScope.launch {
-            _exchangeRates.value = ExchangeRateService.fetchRates()
+            val app = getApplication<Application>()
+            val rates = ExchangeRateService.fetchRates() ?: return@launch
+            ExchangeRateService.saveCachedRates(app, rates)
+            _exchangeRates.value = rates
+            refreshWidgetsNow()
         }
     }
 
@@ -568,10 +575,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             repo.saveTask(Task(UUID.randomUUID().toString(), name, freq, cardId, isInvest,
                 investAmount, day, weekday, months, ndays.coerceAtLeast(1), startDate, date, holidays))
+            refreshWidgetsNow()
         }
     }
-    fun updateTask(t: Task) { viewModelScope.launch { repo.updateTask(t.copy(ndays = t.ndays.coerceAtLeast(1))) } }
-    fun deleteTask(t: Task) { viewModelScope.launch { repo.deleteTask(t) } }
+    fun updateTask(t: Task) {
+        viewModelScope.launch {
+            repo.updateTask(t.copy(ndays = t.ndays.coerceAtLeast(1)))
+            refreshWidgetsNow()
+        }
+    }
+    fun deleteTask(t: Task) {
+        viewModelScope.launch {
+            repo.deleteTask(t)
+            refreshWidgetsNow()
+        }
+    }
 
     fun taskDatesForMonth(year: Int, month: Int): Set<Int> {
         val result = mutableSetOf<Int>()
@@ -662,10 +680,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun addPiggyEntry(amount: Double, desc: String) {
         viewModelScope.launch {
             repo.savePiggy(PiggyEntry(System.currentTimeMillis(), amount, desc, "", LocalDate.now().toString()))
+            refreshWidgetsNow()
         }
     }
-    fun updatePiggyEntry(e: PiggyEntry) { viewModelScope.launch { repo.updatePiggy(e) } }
-    fun deletePiggyEntry(e: PiggyEntry) { viewModelScope.launch { repo.deletePiggy(e) } }
+    fun updatePiggyEntry(e: PiggyEntry) {
+        viewModelScope.launch {
+            repo.updatePiggy(e)
+            refreshWidgetsNow()
+        }
+    }
+    fun deletePiggyEntry(e: PiggyEntry) {
+        viewModelScope.launch {
+            repo.deletePiggy(e)
+            refreshWidgetsNow()
+        }
+    }
 
     private fun isManualPiggyEntry(entry: PiggyEntry): Boolean =
         !entry.desc.startsWith("任务同步：")
@@ -678,15 +707,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 startDate = plan.startDate.ifBlank { LocalDate.now().toString() },
                 initialDate = plan.initialDate.ifBlank { plan.startDate.ifBlank { LocalDate.now().toString() } }
             ))
+            refreshWidgetsNow()
         }
     }
 
     fun updateAssetPlan(plan: AssetPlan) {
-        viewModelScope.launch { repo.updateAssetPlan(plan) }
+        viewModelScope.launch {
+            repo.updateAssetPlan(plan)
+            refreshWidgetsNow()
+        }
     }
 
     fun deleteAssetPlan(plan: AssetPlan) {
-        viewModelScope.launch { repo.deleteAssetPlan(plan) }
+        viewModelScope.launch {
+            repo.deleteAssetPlan(plan)
+            refreshWidgetsNow()
+        }
     }
 
     fun archiveAssetPlan(plan: AssetPlan, countInTotal: Boolean) {
@@ -697,12 +733,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 frozenAmount = frozen,
                 countInTotal = countInTotal
             ))
+            refreshWidgetsNow()
         }
     }
 
     fun restoreAssetPlan(plan: AssetPlan) {
         viewModelScope.launch {
             repo.updateAssetPlan(plan.copy(status = AssetPlanStatus.RUNNING))
+            refreshWidgetsNow()
         }
     }
 
@@ -797,6 +835,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
             )
         }
+        refreshWidgetsNow()
         notify?.invoke(true, "\u5df2\u540c\u6b65 ${inserts.size} \u6761\u4efb\u52a1\u91d1\u989d")
     }
 
@@ -852,6 +891,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val summary = repo.importBackup(app, uri, mode, password)
                 reloadImportedSettings()
+                refreshWidgetsNow()
                 onResult(true, app.getString(R.string.import_success_summary,
                     summary.groupCount, summary.cardCount, summary.taskCount, summary.pigCount, summary.assetPlanCount))
             } catch (e: Exception) { onResult(false, app.getString(R.string.import_failed, e.message ?: "")) }
@@ -937,6 +977,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 result.tasks.forEach { repo.saveTask(it) }
                 result.piggy.forEach { repo.savePiggy(it) }
                 repo.migrateLegacyInvestTasksToAssetPlans()
+                refreshWidgetsNow()
                 val app = getApplication<Application>()
                 onResult(true, app.getString(R.string.import_success_summary,
                     result.groupCount, result.cardCount, result.taskCount, result.piggyCount, 0))
@@ -950,6 +991,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ── Settings helpers（给 UI 直接调用）────────────────
     suspend fun getSetting(key: String, default: String = "") = repo.getSetting(key, default)
     fun setSetting(key: String, value: String) { viewModelScope.launch { repo.setSetting(key, value) } }
+
+    private suspend fun refreshWidgetsNow() {
+        runCatching { CardWidgetUpdater.updateAll(getApplication()) }
+    }
 
     // ── Helpers ────────────────────────────────────────────
     fun cardName(id: String): String {

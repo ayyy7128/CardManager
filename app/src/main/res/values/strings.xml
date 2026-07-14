@@ -95,9 +95,9 @@
     <string name="note_optional">备注（选填）</string>
     <string name="pure_account">纯账户</string>
     <string name="delete_group_title">删除分组？</string>
-    <string name="delete_group_body">会同时删除这个分组下的卡片，以及这些卡片关联的任务、资产记录和 App 内图片。</string>
+    <string name="delete_group_body">会同时删除这个分组下的卡片、关联任务、快速记录和 App 内图片；投资项目会保留并解除卡片关联。</string>
     <string name="delete_card_title">删除卡片？</string>
-    <string name="delete_card_body">会同时删除这张卡关联的任务、资产记录和 App 内图片。</string>
+    <string name="delete_card_body">会同时删除这张卡关联的任务、快速记录和 App 内图片；投资项目会保留并解除卡片关联。</string>
     <string name="select_expiry">选择有效期</string>
     <string name="year_format">%1$d年</string>
     <string name="confirm">确认</string>
@@ -235,7 +235,7 @@
     <string name="import_backup">导入备份</string>
     <string name="backup_success">备份成功（含图片、字体和设置）</string>
     <string name="export_backup_options">导出备份</string>
-    <string name="backup_password_body">备份会使用卡片管家专属格式加密保存，可选择再加入密码。</string>
+    <string name="backup_password_body">新备份必须设置密码，密码不会保存到 App。请妥善保管，忘记后将无法恢复。</string>
     <string name="backup_use_password">使用密码保护</string>
     <string name="backup_password">备份密码</string>
     <string name="backup_password_optional">备份密码（选填）</string>
@@ -257,7 +257,7 @@
     <string name="font_reset_snackbar">已恢复默认字体，重启生效</string>
     <string name="restore_default_font">恢复默认字体</string>
     <string name="about">关于</string>
-    <string name="version_1">&#x7248;&#x672C; 2.2.0</string>
+    <string name="version_1">&#x7248;&#x672C; 2.2.1</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">数据仅存储于本机，不联网，不上传任何信息</string>
     <string name="support_development">&#x652F;&#x6301;&#x5F00;&#x53D1;</string>

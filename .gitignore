@@ -1,8 +1,14 @@
 *.iml
 .gradle/
+.kotlin/
 .idea/
 build/
 app/build/
+app/release/
+*.apk
+.externalNativeBuild/
+.cxx/
+captures/
 local.properties
 *.hprof
 
