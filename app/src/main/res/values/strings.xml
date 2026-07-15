@@ -301,7 +301,7 @@
     <string name="update_check_failed">检查更新失败，请稍后重试</string>
     <string name="update_check_rate_limited">GitHub 请求过于频繁，请稍后重试</string>
     <string name="update_check_no_release">尚未发布可用版本</string>
-    <string name="version_1">&#x7248;&#x672C; 2.3.0</string>
+    <string name="version_1">&#x7248;&#x672C; 2.4.0</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">个人数据仅存本机，不会上传；联网仅用于汇率、交易日和更新检查</string>
     <string name="support_development">&#x652F;&#x6301;&#x5F00;&#x53D1;</string>

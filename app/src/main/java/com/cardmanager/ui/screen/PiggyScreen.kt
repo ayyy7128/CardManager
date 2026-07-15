@@ -1,12 +1,7 @@
 package com.cardmanager.ui.screen
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,7 +28,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.cardmanager.R
 import com.cardmanager.data.AssetCalculator
 import com.cardmanager.data.AssetLogType
@@ -48,6 +42,7 @@ import com.cardmanager.ui.components.AppPanel
 import com.cardmanager.ui.components.CreateFabMenu
 import com.cardmanager.ui.components.CreateFabMenuItem
 import com.cardmanager.ui.components.EmptyState
+import com.cardmanager.ui.components.PredictiveBackPage
 import com.cardmanager.ui.components.SectionHeader
 import com.cardmanager.ui.components.bottomSpacer
 import com.cardmanager.ui.components.responsiveDialogWidth
@@ -59,76 +54,9 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
-internal sealed class AssetOverlay {
-    data class Detail(val plan: AssetPlan) : AssetOverlay()
-    data class Editor(val plan: AssetPlan?) : AssetOverlay()
-}
-
-@Composable
-internal fun AssetOverlayHost(
-    overlay: AssetOverlay?,
-    cards: List<Card>,
-    cardName: (String) -> String,
-    logs: (AssetPlan) -> List<com.cardmanager.data.AssetTransactionLog>,
-    amount: (AssetPlan) -> Double,
-    onDismissDetail: () -> Unit,
-    onEditPlan: (AssetPlan) -> Unit,
-    onAdjustment: (AssetPlan) -> Unit,
-    onDismissEditor: () -> Unit,
-    onSavePlan: (AssetPlan) -> Unit,
-    onDeletePlan: (AssetPlan) -> Unit
-) {
-    overlay?.let { overlayState ->
-        Dialog(
-            onDismissRequest = {
-                when (overlayState) {
-                    is AssetOverlay.Detail -> onDismissDetail()
-                    is AssetOverlay.Editor -> onDismissEditor()
-                }
-            },
-            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-        ) {
-            AnimatedContent(
-                targetState = overlayState,
-                modifier = Modifier.fillMaxSize(),
-                label = "asset_overlay_transition",
-                transitionSpec = {
-                    val duration = 260
-                    (slideInHorizontally(tween(duration)) { it } + fadeIn(tween(duration))) togetherWith
-                        (slideOutHorizontally(tween(duration)) { -it / 4 } + fadeOut(tween(duration)))
-                }
-            ) { page ->
-                when (page) {
-                    is AssetOverlay.Detail -> {
-                        val plan = page.plan
-                        AssetPlanDetailDialog(
-                            plan = plan,
-                            logs = logs(plan),
-                            amount = amount(plan),
-                            linkedCardName = cardName(plan.cardId),
-                            onDismiss = onDismissDetail,
-                            onEdit = { onEditPlan(plan) },
-                            onAdjustment = onAdjustment,
-                            fullScreen = true
-                        )
-                    }
-
-                    is AssetOverlay.Editor -> {
-                        val plan = page.plan
-                        AssetPlanEditorDialog(
-                            initial = plan,
-                            cards = cards,
-                            cardName = cardName,
-                            onDismiss = onDismissEditor,
-                            onSave = onSavePlan,
-                            onDelete = plan?.let { { onDeletePlan(it) } },
-                            fullScreen = true
-                        )
-                    }
-                }
-            }
-        }
-    }
+sealed class AssetPageRoute {
+    data class Detail(val planId: String) : AssetPageRoute()
+    data class Edit(val planId: String?, val returnToDetail: Boolean) : AssetPageRoute()
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -136,23 +64,21 @@ internal fun AssetOverlayHost(
 fun PiggyScreen(
     vm: MainViewModel,
     openAssetPlanId: String? = null,
-    onAssetPlanOpened: () -> Unit = {}
+    onAssetPlanOpened: () -> Unit = {},
+    onOpenAssetPage: (AssetPageRoute) -> Unit = {},
+    floatingNavigationVisible: Boolean = true
 ) {
     val entries by vm.piggyEntries.collectAsState()
     val assetPlans by vm.assetPlans.collectAsState()
     val vaultCurrency by vm.vaultCurrency.collectAsState()
     val exchangeRates by vm.exchangeRates.collectAsState()
     val assetTradingCalendarVersion by vm.assetTradingCalendarVersion.collectAsState()
-    val cards   by vm.cards.collectAsState()
     val cs = MaterialTheme.colorScheme
     val withdrawLabel = stringResource(R.string.withdraw)
 
     var amtStr  by remember { mutableStateOf("") }
     var desc    by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<PiggyEntry?>(null) }
-    var editingAsset by remember { mutableStateOf<AssetPlan?>(null) }
-    var viewingAsset by remember { mutableStateOf<AssetPlan?>(null) }
-    var showAssetEditor by remember { mutableStateOf(false) }
     var showQuickRecord by remember { mutableStateOf(false) }
     var showCreateMenu by remember { mutableStateOf(false) }
     var showQuickRecordDetail by remember { mutableStateOf(false) }
@@ -162,11 +88,6 @@ fun PiggyScreen(
     val archivedAssetPlans = assetPlans.filter { it.status == AssetPlanStatus.STOPPED }
     val manualEntries = remember(entries) { entries.filter(::isManualQuickRecordEntry) }
     val vaultTotal = remember(vaultCurrency, exchangeRates, entries, assetPlans, assetTradingCalendarVersion) { vm.vaultTotalIn(vaultCurrency) }
-    val assetOverlay = when {
-        showAssetEditor -> AssetOverlay.Editor(editingAsset)
-        viewingAsset != null -> AssetOverlay.Detail(viewingAsset!!)
-        else -> null
-    }
 
     LaunchedEffect(snackMsg) {
         snackMsg?.let {
@@ -179,9 +100,7 @@ fun PiggyScreen(
         val planId = openAssetPlanId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         val plan = assetPlans.firstOrNull { it.id == planId }
         if (plan != null) {
-            showAssetEditor = false
-            editingAsset = null
-            viewingAsset = plan
+            onOpenAssetPage(AssetPageRoute.Detail(plan.id))
             onAssetPlanOpened()
         } else if (assetPlans.isNotEmpty()) {
             onAssetPlanOpened()
@@ -236,8 +155,8 @@ fun PiggyScreen(
                     linkedCardName = vm.cardName(plan.cardId),
                     convertedAmount = vm.convertMoney(amount, plan.currency, vaultCurrency),
                     targetCurrency = vaultCurrency,
-                    onClick = { viewingAsset = plan },
-                    onEdit = { editingAsset = plan; showAssetEditor = true },
+                    onClick = { onOpenAssetPage(AssetPageRoute.Detail(plan.id)) },
+                    onEdit = { onOpenAssetPage(AssetPageRoute.Edit(plan.id, returnToDetail = false)) },
                     onArchive = { vm.archiveAssetPlan(plan, plan.countInTotal) },
                     onRestore = { vm.restoreAssetPlan(plan) },
                     onDelete = { vm.deleteAssetPlan(plan) }
@@ -256,8 +175,8 @@ fun PiggyScreen(
                     linkedCardName = vm.cardName(plan.cardId),
                     convertedAmount = vm.convertMoney(amount, plan.currency, vaultCurrency),
                     targetCurrency = vaultCurrency,
-                    onClick = { viewingAsset = plan },
-                    onEdit = { editingAsset = plan; showAssetEditor = true },
+                    onClick = { onOpenAssetPage(AssetPageRoute.Detail(plan.id)) },
+                    onEdit = { onOpenAssetPage(AssetPageRoute.Edit(plan.id, returnToDetail = false)) },
                     onArchive = { vm.archiveAssetPlan(plan, plan.countInTotal) },
                     onRestore = { vm.restoreAssetPlan(plan) },
                     onDelete = { vm.deleteAssetPlan(plan) }
@@ -267,36 +186,30 @@ fun PiggyScreen(
         bottomSpacer(24.dp)
     }
     }
+        val floatingNavigationBottomPadding =
+            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp
+        val floatingNavigationLift by animateDpAsState(
+            targetValue = if (floatingNavigationVisible) 78.dp else 0.dp,
+            animationSpec = tween(durationMillis = 220),
+            label = "piggyFabNavigationLift"
+        )
         CreateFabMenu(
             expanded = showCreateMenu,
             onExpandedChange = { showCreateMenu = it },
             contentDescription = "新增",
             items = listOf(
                 CreateFabMenuItem("快速记录", Icons.Default.Edit) { showQuickRecord = true },
-                CreateFabMenuItem("投资任务", Icons.Default.AccountBalance) { editingAsset = null; showAssetEditor = true }
+                CreateFabMenuItem("投资任务", Icons.Default.AccountBalance) {
+                    onOpenAssetPage(AssetPageRoute.Edit(planId = null, returnToDetail = false))
+                }
             ),
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp)
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = floatingNavigationBottomPadding)
+                .offset(y = -floatingNavigationLift)
         )
         SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
     }
-
-    AssetOverlayHost(
-        overlay = assetOverlay,
-        cards = cards,
-        cardName = vm::cardName,
-        logs = { vm.assetPlanLogs(it) },
-        amount = { vm.assetPlanDisplayAmount(it) },
-        onDismissDetail = { viewingAsset = null },
-        onEditPlan = { plan -> editingAsset = plan; viewingAsset = null; showAssetEditor = true },
-        onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
-        onDismissEditor = { showAssetEditor = false; editingAsset = null },
-        onSavePlan = { plan ->
-            if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
-            showAssetEditor = false
-            editingAsset = null
-        },
-        onDeletePlan = { plan -> vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
-    )
 
     if (showQuickRecordDetail) {
         QuickRecordDetailDialog(
@@ -364,6 +277,81 @@ fun PiggyScreen(
         }
     }
 
+}
+
+@Composable
+fun AssetPageHost(
+    route: AssetPageRoute,
+    vm: MainViewModel,
+    onRouteChange: (AssetPageRoute) -> Unit,
+    onClose: () -> Unit
+) {
+    val assetPlans by vm.assetPlans.collectAsState()
+    val cards by vm.cards.collectAsState()
+
+    when (route) {
+        is AssetPageRoute.Detail -> {
+            val plan = assetPlans.firstOrNull { it.id == route.planId }
+            if (plan == null) {
+                LaunchedEffect(route.planId, assetPlans.size) {
+                    if (assetPlans.isNotEmpty()) onClose()
+                }
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            } else {
+                AssetPlanDetailDialog(
+                    plan = plan,
+                    logs = vm.assetPlanLogs(plan),
+                    amount = vm.assetPlanDisplayAmount(plan),
+                    linkedCardName = vm.cardName(plan.cardId),
+                    onDismiss = onClose,
+                    onEdit = {
+                        onRouteChange(AssetPageRoute.Edit(plan.id, returnToDetail = true))
+                    },
+                    onAdjustment = vm::updateAssetPlan,
+                    fullScreen = true
+                )
+            }
+        }
+
+        is AssetPageRoute.Edit -> {
+            val initial = route.planId?.let { id -> assetPlans.firstOrNull { it.id == id } }
+            val back = {
+                if (route.returnToDetail && route.planId != null) {
+                    onRouteChange(AssetPageRoute.Detail(route.planId))
+                } else {
+                    onClose()
+                }
+            }
+            if (route.planId != null && initial == null) {
+                LaunchedEffect(route.planId, assetPlans.size) {
+                    if (assetPlans.isNotEmpty()) onClose()
+                }
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+            } else {
+                AssetPlanEditorDialog(
+                    initial = initial,
+                    cards = cards,
+                    cardName = vm::cardName,
+                    onDismiss = back,
+                    onSave = { plan ->
+                        if (initial == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
+                        if (route.returnToDetail) {
+                            onRouteChange(AssetPageRoute.Detail(plan.id))
+                        } else {
+                            onClose()
+                        }
+                    },
+                    onDelete = initial?.let {
+                        {
+                            vm.deleteAssetPlan(it)
+                            onClose()
+                        }
+                    },
+                    fullScreen = true
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -672,9 +660,6 @@ fun AssetPlanDetailDialog(
         logs.filter { it.type != AssetLogType.SKIP_WEEKEND && it.type != AssetLogType.SKIP_PAUSE }
             .reversed()
     }
-    if (fullScreen) {
-        BackHandler { onDismiss() }
-    }
     val content: @Composable (Modifier) -> Unit = { modifier ->
         LazyColumn(
             modifier = modifier,
@@ -788,8 +773,10 @@ fun AssetPlanDetailDialog(
         }
     }
     if (fullScreen) {
-        Surface(color = cs.background, modifier = Modifier.fillMaxSize()) {
-            content(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(20.dp))
+        PredictiveBackPage(onBack = onDismiss, modifier = Modifier.fillMaxSize()) {
+            Surface(color = cs.background, modifier = Modifier.fillMaxSize()) {
+                content(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(20.dp))
+            }
         }
     } else {
         Dialog(onDismissRequest = onDismiss) {
@@ -1022,9 +1009,6 @@ fun AssetPlanEditorDialog(
     var countInTotal by remember(initial) { mutableStateOf(initial?.countInTotal ?: true) }
 
     val cs = MaterialTheme.colorScheme
-    if (fullScreen) {
-        BackHandler { onDismiss() }
-    }
     val content: @Composable (Modifier) -> Unit = { modifier ->
             Column(
                 modifier.verticalScroll(rememberScrollState()),
@@ -1208,8 +1192,16 @@ fun AssetPlanEditorDialog(
             }
     }
     if (fullScreen) {
-        Surface(color = cs.background, modifier = Modifier.fillMaxSize()) {
-            content(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars).padding(20.dp))
+        PredictiveBackPage(onBack = onDismiss, modifier = Modifier.fillMaxSize()) {
+            Surface(color = cs.background, modifier = Modifier.fillMaxSize()) {
+                content(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(20.dp)
+                )
+            }
         }
     } else {
         Dialog(onDismissRequest = onDismiss) {

@@ -13,16 +13,12 @@ import android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -84,6 +80,7 @@ import com.cardmanager.nfc.EmvCardReader
 import com.cardmanager.nfc.EmvProbeResult
 import com.cardmanager.ui.components.EmptyState
 import com.cardmanager.ui.components.ItemShape
+import com.cardmanager.ui.components.PredictiveBackPage
 import com.cardmanager.ui.components.bottomSpacer
 import com.cardmanager.ui.components.responsiveDialogWidth
 import com.cardmanager.ui.components.screenPaddingFor
@@ -168,14 +165,18 @@ private data class CardSection(
     val isVirtual: Boolean = false
 )
 
-private sealed class CardOverlay {
-    data class Add(val groupId: String) : CardOverlay()
-    data class Edit(val card: Card) : CardOverlay()
-    data class Focus(val card: Card) : CardOverlay()
+sealed class CardPageRoute {
+    data class Add(val groupId: String) : CardPageRoute()
+    data class Focus(val cardId: String) : CardPageRoute()
+    data class Edit(val cardId: String, val returnToFocus: Boolean) : CardPageRoute()
 }
 
 @Composable
-fun CardsScreen(vm: MainViewModel) {
+fun CardsScreen(
+    vm: MainViewModel,
+    onOpenPage: (CardPageRoute) -> Unit = {},
+    floatingNavigationVisible: Boolean = true
+) {
     val groups   by vm.groups.collectAsState()
     val cards    by vm.cards.collectAsState()
     val imageVersion by vm.imageVersion.collectAsState()
@@ -183,21 +184,14 @@ fun CardsScreen(vm: MainViewModel) {
     val cardsPerRowLandscape by vm.cardsPerRowLandscape.collectAsState()
     val ungroupedMode by vm.ungroupedMode.collectAsState()
     val cardViewMode by vm.cardViewMode.collectAsState()
-    val tasks by vm.tasks.collectAsState()
-    val piggyEntries by vm.piggyEntries.collectAsState()
-    val assetPlans by vm.assetPlans.collectAsState()
     val walletMode = cardViewMode == "wallet"
     val galleryMode = cardViewMode == "gallery"
     val listMode = cardViewMode == "list"
 
     var showAddGroup  by remember { mutableStateOf(false) }
     var editingGroup  by remember { mutableStateOf<CardGroup?>(null) }
-    var showAddCard   by remember { mutableStateOf<String?>(null) }
-    var editingCard   by remember { mutableStateOf<Card?>(null) }
-    var focusedCardId by remember { mutableStateOf<String?>(null) }
     var expandedWalletStacks by remember { mutableStateOf(emptySet<String>()) }
     var deletingGroup by remember { mutableStateOf<CardGroup?>(null) }
-    var deletingCard  by remember { mutableStateOf<Card?>(null) }
     var showCreateMenu by remember { mutableStateOf(false) }
     var showFilter    by remember { mutableStateOf(false) }
     var searchQuery   by remember { mutableStateOf("") }
@@ -275,12 +269,6 @@ fun CardsScreen(vm: MainViewModel) {
     }
         .filter { cardMatches(it) }
         .distinctBy { it.id }
-    val focusedCard = focusedCardId?.let { id -> cards.firstOrNull { it.id == id } }
-
-    LaunchedEffect(focusedCardId, cards) {
-        if (focusedCardId != null && focusedCard == null) focusedCardId = null
-    }
-
     LaunchedEffect(cards, imageVersion) {
         val paths = cards
             .flatMap { listOf(it.logoImagePath, it.bankLogoPath) }
@@ -290,19 +278,6 @@ fun CardsScreen(vm: MainViewModel) {
         withContext(Dispatchers.IO) {
             paths.forEach { path -> ImageStore.load(path, 720) }
         }
-    }
-
-    val activeOverlay = when {
-        showAddCard != null -> CardOverlay.Add(showAddCard.orEmpty())
-        editingCard != null -> CardOverlay.Edit(editingCard!!)
-        focusedCard != null -> CardOverlay.Focus(focusedCard)
-        else -> null
-    }
-
-    fun dismissActiveOverlay() {
-        showAddCard = null
-        editingCard = null
-        focusedCardId = null
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -460,7 +435,7 @@ fun CardsScreen(vm: MainViewModel) {
                                     expandedWalletStacks + stackKey
                                 }
                             },
-                            onOpenCard = { focusedCardId = it.id }
+                            onOpenCard = { onOpenPage(CardPageRoute.Focus(it.id)) }
                         )
                     }
                 } else if (galleryMode) {
@@ -470,7 +445,7 @@ fun CardsScreen(vm: MainViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             row.forEach { card ->
                                 CardGalleryItem(card,
-                                    onEdit = { focusedCardId = card.id },
+                                    onEdit = { onOpenPage(CardPageRoute.Focus(card.id)) },
                                     imageVersion = imageVersion,
                                     modifier = Modifier.weight(1f),
                                     columnsInRow = galleryColumnCount)
@@ -481,7 +456,7 @@ fun CardsScreen(vm: MainViewModel) {
                 } else {
                     items(flatCards, key = { "flat_lst_${it.id}" }) { card ->
                         CardListItem(card,
-                            onEdit = { focusedCardId = card.id },
+                            onEdit = { onOpenPage(CardPageRoute.Focus(card.id)) },
                             onMoveUp = { vm.moveCardUp(card) },
                             onMoveDown = { vm.moveCardDown(card) },
                             imageVersion = imageVersion)
@@ -554,7 +529,7 @@ fun CardsScreen(vm: MainViewModel) {
                                             expandedWalletStacks + stackKey
                                         }
                                     },
-                                    onOpenCard = { focusedCardId = it.id }
+                                    onOpenCard = { onOpenPage(CardPageRoute.Focus(it.id)) }
                                 )
                             }
                         } else if (galleryMode) {
@@ -564,7 +539,7 @@ fun CardsScreen(vm: MainViewModel) {
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                     row.forEach { card ->
                                         CardGalleryItem(card,
-                                            onEdit = { focusedCardId = card.id },
+                                            onEdit = { onOpenPage(CardPageRoute.Focus(card.id)) },
                                             imageVersion = imageVersion,
                                             modifier = Modifier.weight(1f),
                                             columnsInRow = galleryColumnCount)
@@ -575,7 +550,7 @@ fun CardsScreen(vm: MainViewModel) {
                         } else {
                             items(groupCards, key = { "lst_${it.id}" }) { card ->
                                 CardListItem(card,
-                                    onEdit = { focusedCardId = card.id },
+                                    onEdit = { onOpenPage(CardPageRoute.Focus(card.id)) },
                                     onMoveUp = { vm.moveCardUp(card) },
                                     onMoveDown = { vm.moveCardDown(card) },
                                     imageVersion = imageVersion)
@@ -599,8 +574,18 @@ fun CardsScreen(vm: MainViewModel) {
             animationSpec = tween(durationMillis = 180),
             label = "createMenuRotation"
         )
+        val floatingNavigationBottomPadding =
+            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp
+        val floatingNavigationLift by animateDpAsState(
+            targetValue = if (floatingNavigationVisible) 78.dp else 0.dp,
+            animationSpec = tween(durationMillis = 220),
+            label = "cardFabNavigationLift"
+        )
         Column(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = floatingNavigationBottomPadding)
+                .offset(y = -floatingNavigationLift),
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -623,7 +608,7 @@ fun CardsScreen(vm: MainViewModel) {
                         label = stringResource(R.string.add_card),
                         icon = Icons.Default.AddCard
                     ) {
-                        showAddCard = ""
+                        onOpenPage(CardPageRoute.Add(""))
                         showCreateMenu = false
                     }
                     CreateMenuAction(
@@ -690,6 +675,92 @@ fun CardsScreen(vm: MainViewModel) {
         )
     }
 
+}
+
+@Composable
+fun CardPageHost(
+    route: CardPageRoute,
+    vm: MainViewModel,
+    onRouteChange: (CardPageRoute) -> Unit,
+    onClose: () -> Unit
+) {
+    val groups by vm.groups.collectAsState()
+    val cards by vm.cards.collectAsState()
+    val tasks by vm.tasks.collectAsState()
+    val piggyEntries by vm.piggyEntries.collectAsState()
+    val assetPlans by vm.assetPlans.collectAsState()
+    val imageVersion by vm.imageVersion.collectAsState()
+    var deletingCard by remember { mutableStateOf<Card?>(null) }
+
+    when (route) {
+        is CardPageRoute.Add -> CardDialog(
+            groups = groups,
+            selectedGroupId = route.groupId,
+            onDismiss = onClose,
+            asPage = true
+        ) { d ->
+            vm.addCard(
+                d.groupId, d.bank, d.network, d.currency, d.tail, d.note,
+                d.status, d.isVirtual, d.noCard, "", d.logoImagePath, d.bankLogoPath,
+                d.cardTypeName, d.expiryDate, d.cardCategory, d.imageOrientation,
+                d.creditLimit, d.billingDay, d.repaymentDay
+            )
+            onClose()
+        }
+
+        is CardPageRoute.Focus -> {
+            val card = cards.firstOrNull { it.id == route.cardId }
+            if (card == null) {
+                LaunchedEffect(route.cardId) { onClose() }
+            } else {
+                CardFocusPage(
+                    card = card,
+                    groups = groups,
+                    tasks = tasks,
+                    piggyEntries = piggyEntries,
+                    assetPlans = assetPlans,
+                    imageVersion = imageVersion,
+                    onBack = onClose,
+                    onEdit = { onRouteChange(CardPageRoute.Edit(card.id, returnToFocus = true)) }
+                )
+            }
+        }
+
+        is CardPageRoute.Edit -> {
+            val card = cards.firstOrNull { it.id == route.cardId }
+            val back = {
+                if (route.returnToFocus) onRouteChange(CardPageRoute.Focus(route.cardId)) else onClose()
+            }
+            if (card == null) {
+                LaunchedEffect(route.cardId) { onClose() }
+            } else {
+                CardDialog(
+                    initial = card,
+                    groups = groups,
+                    onDismiss = back,
+                    onDelete = { deletingCard = card },
+                    asPage = true
+                ) { d ->
+                    val movedToNewGroup = d.groupId != card.groupId
+                    val nextOrder = if (movedToNewGroup) cards.count { it.groupId == d.groupId } else card.sortOrder
+                    vm.updateCard(
+                        card.copy(
+                            groupId = d.groupId, bank = d.bank, network = d.network, currency = d.currency,
+                            tail = d.tail, note = d.note, status = d.status,
+                            isVirtual = d.isVirtual, noCard = d.noCard, logoImagePath = d.logoImagePath,
+                            bankLogoPath = d.bankLogoPath, cardTypeName = d.cardTypeName,
+                            expiryDate = d.expiryDate, cardCategory = d.cardCategory,
+                            sortOrder = nextOrder, imageOrientation = d.imageOrientation,
+                            creditLimit = d.creditLimit, billingDay = d.billingDay,
+                            repaymentDay = d.repaymentDay
+                        )
+                    )
+                    back()
+                }
+            }
+        }
+    }
+
     deletingCard?.let { card ->
         AlertDialog(
             onDismissRequest = { deletingCard = null },
@@ -697,79 +768,18 @@ fun CardsScreen(vm: MainViewModel) {
             text = { Text(stringResource(R.string.delete_card_body)) },
             confirmButton = {
                 Button(
-                    onClick = { vm.deleteCard(card); deletingCard = null },
+                    onClick = {
+                        vm.deleteCard(card)
+                        deletingCard = null
+                        onClose()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = ColorRed)
                 ) { Text(stringResource(R.string.delete)) }
             },
-            dismissButton = { TextButton(onClick = { deletingCard = null }) { Text(stringResource(R.string.cancel)) } }
-        )
-    }
-
-    activeOverlay?.let { overlayState ->
-        Dialog(
-            onDismissRequest = { dismissActiveOverlay() },
-            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
-        ) {
-            AnimatedContent(
-                targetState = overlayState,
-                modifier = Modifier.fillMaxSize(),
-                label = "card_overlay_transition",
-                transitionSpec = {
-                    val duration = 260
-                    (slideInHorizontally(tween(duration)) { it } + fadeIn(tween(duration))) togetherWith
-                        (slideOutHorizontally(tween(duration)) { -it / 4 } + fadeOut(tween(duration)))
-                }
-            ) { overlay ->
-                when (overlay) {
-                    is CardOverlay.Add -> CardDialog(
-                        groups = groups,
-                        selectedGroupId = overlay.groupId,
-                        onDismiss = { showAddCard = null },
-                        asPage = true
-                    ) { d ->
-                        vm.addCard(d.groupId, d.bank, d.network, d.currency, d.tail, d.note,
-                            d.status, d.isVirtual, d.noCard, "", d.logoImagePath, d.bankLogoPath,
-                            d.cardTypeName, d.expiryDate, d.cardCategory, d.imageOrientation,
-                            d.creditLimit, d.billingDay, d.repaymentDay)
-                        showAddCard = null
-                    }
-
-                    is CardOverlay.Edit -> {
-                        val card = overlay.card
-                        CardDialog(
-                            initial = card,
-                            groups = groups,
-                            onDismiss = { editingCard = null },
-                            onDelete = { deletingCard = card; editingCard = null; focusedCardId = null },
-                            asPage = true
-                        ) { d ->
-                            val movedToNewGroup = d.groupId != card.groupId
-                            val nextOrder = if (movedToNewGroup) cards.count { it.groupId == d.groupId } else card.sortOrder
-                            vm.updateCard(card.copy(groupId = d.groupId, bank = d.bank, network = d.network, currency = d.currency,
-                                tail = d.tail, note = d.note, status = d.status,
-                                isVirtual = d.isVirtual, noCard = d.noCard, logoImagePath = d.logoImagePath,
-                                bankLogoPath = d.bankLogoPath, cardTypeName = d.cardTypeName,
-                                expiryDate = d.expiryDate, cardCategory = d.cardCategory,
-                                sortOrder = nextOrder, imageOrientation = d.imageOrientation,
-                                creditLimit = d.creditLimit, billingDay = d.billingDay,
-                                repaymentDay = d.repaymentDay))
-                            editingCard = null
-                        }
-                    }
-
-                    is CardOverlay.Focus -> CardFocusPage(
-                        card = overlay.card,
-                        groups = groups,
-                        tasks = tasks,
-                        piggyEntries = piggyEntries,
-                        assetPlans = assetPlans,
-                        imageVersion = imageVersion,
-                        onBack = { focusedCardId = null },
-                        onEdit = { editingCard = overlay.card }
-                    )
-                }
+            dismissButton = {
+                TextButton(onClick = { deletingCard = null }) { Text(stringResource(R.string.cancel)) }
             }
-        }
+        )
     }
 }
 
@@ -1017,7 +1027,6 @@ private fun CardFocusPage(
     onBack: () -> Unit,
     onEdit: () -> Unit
 ) {
-    BackHandler(onBack = onBack)
     val cs = MaterialTheme.colorScheme
     val groupName = groups.firstOrNull { it.id == card.groupId }?.name ?: stringResource(R.string.ungrouped_cards)
     val relatedTasks = tasks.filter { it.cardId == card.id }
@@ -1036,13 +1045,14 @@ private fun CardFocusPage(
         else -> card.network
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(cs.background)) {
-        val pagePadding = screenPaddingFor(maxWidth)
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
-            contentPadding = pagePadding,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
+    PredictiveBackPage(onBack = onBack, modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(cs.background)) {
+            val pagePadding = screenPaddingFor(maxWidth)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars),
+                contentPadding = pagePadding,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1100,7 +1110,14 @@ private fun CardFocusPage(
                     FocusInfoRow(stringResource(R.string.card_related_assets), relatedPlans.take(3).joinToString { it.name.ifBlank { it.platform } }.ifBlank { "0" })
                 }
             }
-            bottomSpacer()
+                item {
+                    Spacer(
+                        Modifier
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .height(20.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -2729,31 +2746,38 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     }
 
     if (asPage) {
-        BackHandler(onBack = {
-            if (showBankPicker) showBankPicker = false else onDismiss()
-        })
-        Surface(
-            color = MaterialTheme.colorScheme.background,
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
+        PredictiveBackPage(
+            onBack = { if (showBankPicker) showBankPicker = false else onDismiss() },
+            modifier = Modifier.fillMaxSize()
         ) {
-            if (showBankPicker) {
-                BankPickerPage(
-                    banks = builtinBanks,
-                    selectedBank = selectedBuiltinBank?.name.orEmpty(),
-                    onBack = { showBankPicker = false },
-                    onSelect = { selected ->
-                        bank = selected.name
-                        bankLogoPath = ""
-                        bankLogoRefreshKey++
-                        submitted = false
-                        showBankPicker = false
-                    },
-                    onMissing = { showMissingBankMenu = true }
-                )
-            } else {
-                EditorBody(Modifier.fillMaxSize().padding(20.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                ) {
+                    if (showBankPicker) {
+                        BankPickerPage(
+                            banks = builtinBanks,
+                            selectedBank = selectedBuiltinBank?.name.orEmpty(),
+                            onBack = { showBankPicker = false },
+                            onSelect = { selected ->
+                                bank = selected.name
+                                bankLogoPath = ""
+                                bankLogoRefreshKey++
+                                submitted = false
+                                showBankPicker = false
+                            },
+                            onMissing = { showMissingBankMenu = true }
+                        )
+                    } else {
+                        EditorBody(Modifier.fillMaxSize().padding(20.dp))
+                    }
+                }
             }
         }
     } else {

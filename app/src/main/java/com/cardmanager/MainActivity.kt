@@ -3,19 +3,23 @@ package com.cardmanager
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -26,7 +30,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +55,7 @@ import com.cardmanager.data.ReleaseInfo
 import com.cardmanager.data.UpdateCheckResult
 import com.cardmanager.data.UpdateCheckService
 import com.cardmanager.ui.components.UpdateAvailableDialog
+import com.cardmanager.ui.components.PredictiveBackPage
 import com.cardmanager.ui.screen.*
 import com.cardmanager.ui.theme.*
 import com.cardmanager.viewmodel.MainViewModel
@@ -143,6 +155,26 @@ val tabs = listOf(NavTab.Cards, NavTab.Calendar, NavTab.Piggy, NavTab.Data)
 private val requiredTabIds = setOf(NavTab.Cards.id, NavTab.Data.id)
 fun tabById(id: String): NavTab? = tabs.firstOrNull { it.id == id }
 
+private sealed class AppPage {
+    data object Home : AppPage()
+    data object Settings : AppPage()
+    data class Card(val route: CardPageRoute) : AppPage()
+    data class Asset(val route: AssetPageRoute) : AppPage()
+}
+
+private fun AppPage.depth(): Int = when (this) {
+    AppPage.Home -> 0
+    AppPage.Settings -> 1
+    is AppPage.Card -> when (route) {
+        is CardPageRoute.Focus -> 1
+        is CardPageRoute.Add, is CardPageRoute.Edit -> 2
+    }
+    is AppPage.Asset -> when (route) {
+        is AssetPageRoute.Detail -> 1
+        is AssetPageRoute.Edit -> 2
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalAnimationApi::class)
 @Composable
 fun CardManagerApp(
@@ -155,7 +187,13 @@ fun CardManagerApp(
     var pendingPiggyAssetPlanId by remember { mutableStateOf<String?>(null) }
     var allowHiddenCurrent by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var cardPage by remember { mutableStateOf<CardPageRoute?>(null) }
+    var assetPage by remember { mutableStateOf<AssetPageRoute?>(null) }
+    var sectionFullscreen by remember { mutableStateOf(false) }
+    var bottomBarVisible by remember { mutableStateOf(true) }
+    var bottomBarScrollDelta by remember { mutableFloatStateOf(0f) }
     var availableUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
+    val bottomBarScrollThreshold = with(LocalDensity.current) { 64.dp.toPx() }
     val themeMode by vm.themeMode.collectAsState()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
@@ -188,10 +226,48 @@ fun CardManagerApp(
         }
     }
 
+    LaunchedEffect(current) {
+        sectionFullscreen = false
+        bottomBarVisible = true
+        bottomBarScrollDelta = 0f
+    }
+
+    val bottomBarNestedScroll = remember(bottomBarScrollThreshold) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source != NestedScrollSource.Drag || consumed.y == 0f) return Offset.Zero
+                if (bottomBarScrollDelta != 0f && bottomBarScrollDelta * consumed.y < 0f) {
+                    bottomBarScrollDelta = 0f
+                }
+                bottomBarScrollDelta = (bottomBarScrollDelta + consumed.y).coerceIn(
+                    -bottomBarScrollThreshold * 2f,
+                    bottomBarScrollThreshold * 2f
+                )
+                when {
+                    bottomBarScrollDelta <= -bottomBarScrollThreshold -> {
+                        bottomBarVisible = false
+                        bottomBarScrollDelta = 0f
+                    }
+                    bottomBarScrollDelta >= bottomBarScrollThreshold -> {
+                        bottomBarVisible = true
+                        bottomBarScrollDelta = 0f
+                    }
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     LaunchedEffect(launchRequest, visibleTabs) {
         val request = launchRequest ?: return@LaunchedEffect
         val target = tabById(request.targetTab) ?: NavTab.Cards
         current = target
+        cardPage = null
+        assetPage = null
         allowHiddenCurrent = target !in visibleTabs
         pendingPiggyAssetPlanId = request.assetPlanId.takeIf {
             target == NavTab.Piggy && it.isNotBlank()
@@ -199,14 +275,21 @@ fun CardManagerApp(
         onLaunchRequestConsumed()
     }
 
+    val appPage = when {
+        showSettings -> AppPage.Settings
+        cardPage != null -> AppPage.Card(cardPage!!)
+        assetPage != null -> AppPage.Asset(assetPage!!)
+        else -> AppPage.Home
+    }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         AnimatedContent(
-            targetState = showSettings,
+            targetState = appPage,
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-            label = "settings_page_transition",
+            label = "app_page_transition",
             transitionSpec = {
                 val duration = 260
-                if (targetState) {
+                if (targetState.depth() > initialState.depth()) {
                     (slideInHorizontally(tween(duration)) { it } + fadeIn(tween(duration))) togetherWith
                         (slideOutHorizontally(tween(duration)) { -it / 4 } + fadeOut(tween(duration)))
                 } else {
@@ -214,30 +297,81 @@ fun CardManagerApp(
                         (slideOutHorizontally(tween(duration)) { it } + fadeOut(tween(duration)))
                 }
             }
-        ) { settingsVisible ->
-            if (settingsVisible) {
-                BackHandler { showSettings = false }
-                SettingsScreen(vm) { showSettings = false }
-            } else {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        ) { page ->
+            when (page) {
+                AppPage.Settings -> PredictiveBackPage(
+                    onBack = { showSettings = false },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    SettingsScreen(vm) { showSettings = false }
+                }
+
+                is AppPage.Card -> CardPageHost(
+                    route = page.route,
+                    vm = vm,
+                    onRouteChange = { cardPage = it },
+                    onClose = { cardPage = null }
+                )
+
+                is AppPage.Asset -> AssetPageHost(
+                    route = page.route,
+                    vm = vm,
+                    onRouteChange = { assetPage = it },
+                    onClose = { assetPage = null }
+                )
+
+                AppPage.Home -> Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
+                        .nestedScroll(bottomBarNestedScroll)
+                ) {
                     Scaffold(
                         contentWindowInsets = WindowInsets(0),
-                        topBar = { AppTopBar(current, isDark) { showSettings = true } },
-                        bottomBar = { AppBottomBar(visibleTabs, current) { allowHiddenCurrent = false; current = it } },
+                        topBar = {
+                            if (!sectionFullscreen) AppTopBar(current, isDark) { showSettings = true }
+                        },
                         containerColor = MaterialTheme.colorScheme.background
                     ) { padding ->
                         Box(Modifier.padding(padding).fillMaxSize()) {
                             when (current) {
-                                NavTab.Cards    -> CardsScreen(vm)
-                                NavTab.Calendar -> CalendarScreen(vm)
+                                NavTab.Cards -> CardsScreen(
+                                    vm = vm,
+                                    onOpenPage = { cardPage = it },
+                                    floatingNavigationVisible = bottomBarVisible
+                                )
+                                NavTab.Calendar -> CalendarScreen(
+                                    vm = vm,
+                                    onFullscreenChanged = { sectionFullscreen = it },
+                                    onOpenAssetPage = { assetPage = it },
+                                    floatingNavigationVisible = bottomBarVisible
+                                )
                                 NavTab.Piggy    -> PiggyScreen(
                                     vm = vm,
                                     openAssetPlanId = pendingPiggyAssetPlanId,
-                                    onAssetPlanOpened = { pendingPiggyAssetPlanId = null }
+                                    onAssetPlanOpened = { pendingPiggyAssetPlanId = null },
+                                    onOpenAssetPage = { assetPage = it },
+                                    floatingNavigationVisible = bottomBarVisible
                                 )
                                 NavTab.Data     -> DataScreen(vm)
                             }
                         }
+                    }
+                    AnimatedVisibility(
+                        visible = !sectionFullscreen && bottomBarVisible,
+                        modifier = Modifier.align(Alignment.BottomCenter).zIndex(20f),
+                        enter = slideInVertically(tween(220)) { it + 24 } + fadeIn(tween(180)),
+                        exit = slideOutVertically(tween(220)) { it + 24 } + fadeOut(tween(180))
+                    ) {
+                        AppBottomBar(
+                            visibleTabs = visibleTabs,
+                            current = current,
+                            onSelect = {
+                                allowHiddenCurrent = false
+                                bottomBarVisible = true
+                                current = it
+                            }
+                        )
                     }
                 }
             }
@@ -283,33 +417,89 @@ fun AppTopBar(tab: NavTab, isDark: Boolean, onSettings: () -> Unit) {
 }
 
 @Composable
-fun AppBottomBar(visibleTabs: List<NavTab>, current: NavTab, onSelect: (NavTab) -> Unit) {
+fun AppBottomBar(
+    visibleTabs: List<NavTab>,
+    current: NavTab,
+    onSelect: (NavTab) -> Unit,
+    modifier: Modifier = Modifier
+) {
     val cs = MaterialTheme.colorScheme
     val bottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    Surface(Modifier.fillMaxWidth(), color = cs.surface, shadowElevation = 0.dp, tonalElevation = 0.dp) {
-        Column(Modifier.padding(bottom = bottomPad.coerceAtLeast(4.dp))) {
-            HorizontalDivider(color = cs.outline.copy(alpha = 0.18f))
-            NavigationBar(
-                modifier = Modifier.height(64.dp),
-                containerColor = cs.surface,
-                tonalElevation = 0.dp,
-                windowInsets = WindowInsets(0)
+    val isDarkSurface = cs.background.luminance() < 0.5f
+    Box(
+        modifier
+            .wrapContentWidth()
+            .padding(bottom = bottomPad + 14.dp)
+    ) {
+        val barShape = RoundedCornerShape(30.dp)
+        Box(
+            Modifier
+                .height(68.dp)
+                .shadow(12.dp, barShape, clip = false)
+                .clip(barShape)
+                .background(cs.surface)
+                .border(
+                    1.dp,
+                    if (isDarkSurface) Color.White.copy(alpha = 0.16f)
+                    else Color.White.copy(alpha = 0.72f),
+                    barShape
+                )
+        ) {
+            Row(
+                modifier = Modifier.fillMaxHeight().padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
                 visibleTabs.forEach { tab ->
                     val selected = current == tab
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = { onSelect(tab) },
-                        icon = { Icon(if (selected) tab.iconSelected else tab.icon, stringResource(tab.labelRes)) },
-                        label = { Text(stringResource(tab.labelRes), fontSize = 11.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = cs.primary,
-                            selectedTextColor = cs.primary,
-                            indicatorColor = cs.primary.copy(alpha = 0.12f),
-                            unselectedIconColor = cs.onSurfaceVariant,
-                            unselectedTextColor = cs.onSurfaceVariant
-                        )
-                    )
+                    val itemShape = RoundedCornerShape(25.dp)
+                    Box(
+                        modifier = Modifier
+                            .width(76.dp)
+                            .fillMaxHeight()
+                            .clip(itemShape)
+                            .background(
+                                if (selected) {
+                                    cs.surfaceVariant
+                                } else {
+                                    Color.Transparent
+                                }
+                            )
+                            .then(
+                                if (selected) {
+                                    Modifier.border(
+                                        1.dp,
+                                        if (isDarkSurface) Color.White.copy(alpha = 0.10f)
+                                        else Color.White.copy(alpha = 0.58f),
+                                        itemShape
+                                    )
+                                } else Modifier
+                            )
+                    ) {
+                        Column(
+                            Modifier
+                                .fillMaxSize()
+                                .clickable { onSelect(tab) },
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                if (selected) tab.iconSelected else tab.icon,
+                                stringResource(tab.labelRes),
+                                tint = if (selected) cs.primary else cs.onSurfaceVariant,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                stringResource(tab.labelRes),
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) cs.primary else cs.onSurfaceVariant,
+                                letterSpacing = 0.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
                 }
             }
         }

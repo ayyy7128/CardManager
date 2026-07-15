@@ -301,7 +301,7 @@
     <string name="update_check_failed">Could not check for updates. Try again later.</string>
     <string name="update_check_rate_limited">GitHub request limit reached. Try again later.</string>
     <string name="update_check_no_release">No release is available yet.</string>
-    <string name="version_1">Version 2.3.0</string>
+    <string name="version_1">Version 2.4.0</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">Personal data stays on this device and is never uploaded. Network access is only used for rates, trading days, and update checks.</string>
     <string name="support_development">Support development</string>

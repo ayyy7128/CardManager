@@ -118,7 +118,7 @@
       "english": "Chase UK",
       "section": "C",
       "sortKey": "chase uk",
-      "logo": "",
+      "logo": "banks/logos/1d0987c0929c0e8a.webp",
       "aliases": []
     },
     {
@@ -680,7 +680,7 @@
       "english": "Elebank",
       "section": "X",
       "sortKey": "elebank",
-      "logo": "",
+      "logo": "banks/logos/edea649670e5fabc.webp",
       "aliases": [
         "天星银行",
         "天星銀行",
@@ -832,12 +832,38 @@
       "aliases": []
     },
     {
+      "name": "中信銀行（國際）",
+      "english": "China CITIC Bank International",
+      "section": "Z",
+      "sortKey": "china citic bank international",
+      "logo": "banks/logos/592de55f9c15c660.webp",
+      "aliases": [
+        "中信银行（国际）",
+        "中信銀行國際",
+        "中信银行国际",
+        "CNCBI"
+      ]
+    },
+    {
       "name": "中国建设银行",
       "english": "China Construction Bank",
       "section": "Z",
       "sortKey": "china construction bank",
       "logo": "banks/logos/15df9e55adb60aea.webp",
       "aliases": []
+    },
+    {
+      "name": "中國建設銀行（亞洲）",
+      "english": "China Construction Bank (Asia)",
+      "section": "Z",
+      "sortKey": "china construction bank asia",
+      "logo": "banks/logos/15df9e55adb60aea.webp",
+      "aliases": [
+        "中国建设银行（亚洲）",
+        "中国建设银行亚洲",
+        "中國建設銀行亞洲",
+        "CCB Asia"
+      ]
     },
     {
       "name": "招商银行",

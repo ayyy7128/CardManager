@@ -1,7 +1,8 @@
 package com.cardmanager.ui.screen
 
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,13 +14,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -55,6 +62,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -89,6 +97,7 @@ import com.cardmanager.ui.components.AppPanel
 import com.cardmanager.ui.components.CreateFabMenu
 import com.cardmanager.ui.components.CreateFabMenuItem
 import com.cardmanager.ui.components.EmptyState
+import com.cardmanager.ui.components.PredictiveBackPage
 import com.cardmanager.ui.components.SectionHeader
 import com.cardmanager.ui.components.StatusPill
 import com.cardmanager.ui.components.bottomSpacer
@@ -98,37 +107,46 @@ import com.cardmanager.ui.theme.ColorActive
 import com.cardmanager.ui.theme.ColorGold
 import com.cardmanager.ui.theme.ColorRed
 import com.cardmanager.viewmodel.MainViewModel
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
 @Composable
-fun CalendarScreen(vm: MainViewModel) {
+fun CalendarScreen(
+    vm: MainViewModel,
+    onFullscreenChanged: (Boolean) -> Unit = {},
+    onOpenAssetPage: (AssetPageRoute) -> Unit = {},
+    floatingNavigationVisible: Boolean = true
+) {
     val today = LocalDate.now()
     var year by remember { mutableStateOf(today.year) }
     var month by remember { mutableStateOf(today.monthValue) }
     var selectedDay by remember { mutableStateOf(today.dayOfMonth) }
     var showAddTask by remember { mutableStateOf(false) }
     var showCreateMenu by remember { mutableStateOf(false) }
-    var showAssetEditor by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
-    var editingAsset by remember { mutableStateOf<com.cardmanager.data.AssetPlan?>(null) }
-    var viewingAsset by remember { mutableStateOf<com.cardmanager.data.AssetPlan?>(null) }
     var deletingTask by remember { mutableStateOf<Task?>(null) }
     val ctx = LocalContext.current
 
     val tasks by vm.tasks.collectAsState()
-    val cards by vm.cards.collectAsState()
     val regularTasks = remember(tasks) { tasks.filterNot { it.isInvest } }
     val assetPlans by vm.assetPlans.collectAsState()
     val vaultCurrency by vm.vaultCurrency.collectAsState()
     val exchangeRates by vm.exchangeRates.collectAsState()
     val assetTradingCalendarVersion by vm.assetTradingCalendarVersion.collectAsState()
     val runningAssetPlans = remember(assetPlans, exchangeRates) { assetPlans.filter { it.status != AssetPlanStatus.STOPPED } }
-    val assetOverlay = when {
-        showAssetEditor -> AssetOverlay.Editor(editingAsset)
-        viewingAsset != null -> AssetOverlay.Detail(viewingAsset!!)
-        else -> null
+    val hasFullscreenPage = showAddTask || editingTask != null
+    LaunchedEffect(hasFullscreenPage) {
+        if (hasFullscreenPage) {
+            onFullscreenChanged(true)
+        } else {
+            delay(260)
+            onFullscreenChanged(false)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { onFullscreenChanged(false) }
     }
     var tradingDaysReady by remember(year) { mutableStateOf(TradingDayService.isLoaded(year)) }
     val selectedDate = remember(year, month, selectedDay) { LocalDate.of(year, month, selectedDay) }
@@ -244,8 +262,8 @@ fun CalendarScreen(vm: MainViewModel) {
                         vaultCurrency = vaultCurrency,
                         expanded = sectionExpanded,
                         onEdit = { editingTask = it },
-                        onOpenAsset = { viewingAsset = it },
-                        onEditAsset = { editingAsset = it; showAssetEditor = true }
+                        onOpenAsset = { onOpenAssetPage(AssetPageRoute.Detail(it.id)) },
+                        onEditAsset = { onOpenAssetPage(AssetPageRoute.Edit(it.id, returnToDetail = false)) }
                     )
                     calendarAssetSections(
                         assetPlans = runningAssetPlans,
@@ -253,8 +271,8 @@ fun CalendarScreen(vm: MainViewModel) {
                         vaultCurrency = vaultCurrency,
                         expanded = sectionExpanded["asset"] ?: true,
                         onToggleExpanded = { sectionExpanded["asset"] = !(sectionExpanded["asset"] ?: true) },
-                        onOpen = { viewingAsset = it },
-                        onEdit = { editingAsset = it; showAssetEditor = true }
+                        onOpen = { onOpenAssetPage(AssetPageRoute.Detail(it.id)) },
+                        onEdit = { onOpenAssetPage(AssetPageRoute.Edit(it.id, returnToDetail = false)) }
                     )
                 }
             }
@@ -306,8 +324,8 @@ fun CalendarScreen(vm: MainViewModel) {
                     vaultCurrency = vaultCurrency,
                     expanded = sectionExpanded,
                     onEdit = { editingTask = it },
-                    onOpenAsset = { viewingAsset = it },
-                    onEditAsset = { editingAsset = it; showAssetEditor = true }
+                    onOpenAsset = { onOpenAssetPage(AssetPageRoute.Detail(it.id)) },
+                    onEditAsset = { onOpenAssetPage(AssetPageRoute.Edit(it.id, returnToDetail = false)) }
                 )
                 calendarAssetSections(
                     assetPlans = runningAssetPlans,
@@ -315,22 +333,34 @@ fun CalendarScreen(vm: MainViewModel) {
                     vaultCurrency = vaultCurrency,
                     expanded = sectionExpanded["asset"] ?: true,
                     onToggleExpanded = { sectionExpanded["asset"] = !(sectionExpanded["asset"] ?: true) },
-                    onOpen = { viewingAsset = it },
-                    onEdit = { editingAsset = it; showAssetEditor = true }
+                    onOpen = { onOpenAssetPage(AssetPageRoute.Detail(it.id)) },
+                    onEdit = { onOpenAssetPage(AssetPageRoute.Edit(it.id, returnToDetail = false)) }
                 )
                 bottomSpacer()
             }
         }
 
+        val floatingNavigationBottomPadding =
+            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp
+        val floatingNavigationLift by animateDpAsState(
+            targetValue = if (floatingNavigationVisible) 78.dp else 0.dp,
+            animationSpec = tween(durationMillis = 220),
+            label = "calendarFabNavigationLift"
+        )
         CreateFabMenu(
             expanded = showCreateMenu,
             onExpandedChange = { showCreateMenu = it },
             contentDescription = newTask,
             items = listOf(
                 CreateFabMenuItem("定期任务", Icons.Default.TaskAlt) { showAddTask = true },
-                CreateFabMenuItem("投资任务", Icons.Default.AccountBalance) { editingAsset = null; showAssetEditor = true }
+                CreateFabMenuItem("投资任务", Icons.Default.AccountBalance) {
+                    onOpenAssetPage(AssetPageRoute.Edit(planId = null, returnToDetail = false))
+                }
             ),
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 20.dp, bottom = floatingNavigationBottomPadding)
+                .offset(y = -floatingNavigationLift),
         )
     }
 
@@ -383,24 +413,6 @@ fun CalendarScreen(vm: MainViewModel) {
             editingTask = null
         }
     }
-
-    AssetOverlayHost(
-        overlay = assetOverlay,
-        cards = cards,
-        cardName = vm::cardName,
-        logs = { vm.assetPlanLogs(it) },
-        amount = { vm.assetPlanDisplayAmount(it) },
-        onDismissDetail = { viewingAsset = null },
-        onEditPlan = { plan -> editingAsset = plan; viewingAsset = null; showAssetEditor = true },
-        onAdjustment = { updated -> vm.updateAssetPlan(updated); viewingAsset = updated },
-        onDismissEditor = { showAssetEditor = false; editingAsset = null },
-        onSavePlan = { plan ->
-            if (editingAsset == null) vm.addAssetPlan(plan) else vm.updateAssetPlan(plan)
-            showAssetEditor = false
-            editingAsset = null
-        },
-        onDeletePlan = { plan -> vm.deleteAssetPlan(plan); showAssetEditor = false; editingAsset = null }
-    )
 
     deletingTask?.let { task ->
         AlertDialog(
@@ -920,9 +932,6 @@ fun TaskDialog(
     )
 
     val cs = MaterialTheme.colorScheme
-    if (fullScreen) {
-        BackHandler { onDismiss() }
-    }
     val content: @Composable () -> Unit = {
             Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1093,9 +1102,18 @@ fun TaskDialog(
             }
     }
     if (fullScreen) {
-        Box(Modifier.fillMaxSize().background(cs.background)) {
-            Surface(color = cs.surface, modifier = Modifier.fillMaxSize()) {
-                content()
+        PredictiveBackPage(onBack = onDismiss, modifier = Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().background(cs.background)) {
+                Surface(color = cs.surface, modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                    ) {
+                        content()
+                    }
+                }
             }
         }
     } else {
