@@ -13,7 +13,7 @@ data class ReleaseInfo(
     val versionName: String,
     val title: String,
     val notes: String,
-    val releaseUrl: String,
+    val downloadUrl: String,
     val publishedAt: String
 )
 
@@ -34,8 +34,6 @@ sealed class UpdateCheckResult {
 object UpdateCheckService {
     private const val LATEST_RELEASE_API =
         "https://api.github.com/repos/ayyy7128/CardManager/releases/latest"
-    const val RELEASES_PAGE = "https://github.com/ayyy7128/CardManager/releases"
-
     private const val PREFS = "cm_update_check"
     private const val KEY_LAST_AUTO_CHECK = "last_auto_check"
     private const val KEY_LAST_PROMPTED_VERSION = "last_prompted_version"
@@ -109,8 +107,8 @@ object UpdateCheckService {
             .apply()
     }
 
-    fun openReleasePage(context: Context, releaseUrl: String): Boolean {
-        val safeUrl = validatedReleaseUrl(releaseUrl) ?: RELEASES_PAGE
+    fun openDownload(context: Context, downloadUrl: String): Boolean {
+        val safeUrl = validatedDownloadUrl(downloadUrl) ?: return false
         return runCatching {
             context.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(safeUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -140,15 +138,41 @@ object UpdateCheckService {
         val json = JSONObject(raw)
         val tagName = json.getString("tag_name").trim()
         require(parseVersion(tagName) != null)
-        val apiUrl = json.optString("html_url").trim()
-        val releaseUrl = validatedReleaseUrl(apiUrl) ?: RELEASES_PAGE
+        val downloadUrl = selectApkDownloadUrl(json)
+            ?: throw IllegalArgumentException("Release does not contain a valid APK asset")
         return ReleaseInfo(
             versionName = normalizeVersion(tagName),
             title = json.optString("name").trim().ifBlank { tagName },
             notes = json.optString("body").trim(),
-            releaseUrl = releaseUrl,
+            downloadUrl = downloadUrl,
             publishedAt = json.optString("published_at").trim()
         )
+    }
+
+    private fun selectApkDownloadUrl(release: JSONObject): String? {
+        val assets = release.optJSONArray("assets") ?: return null
+        return (0 until assets.length())
+            .mapNotNull { index ->
+                val asset = assets.optJSONObject(index) ?: return@mapNotNull null
+                val name = asset.optString("name").trim()
+                if (!name.endsWith(".apk", ignoreCase = true)) return@mapNotNull null
+                val downloadUrl = validatedDownloadUrl(
+                    asset.optString("browser_download_url").trim()
+                ) ?: return@mapNotNull null
+                val normalizedName = name.lowercase()
+                if ("debug" in normalizedName || "unsigned" in normalizedName) {
+                    return@mapNotNull null
+                }
+                val score = when {
+                    "release" in normalizedName && "cardmanager" in normalizedName -> 4
+                    "release" in normalizedName || "cardmanager" in normalizedName -> 3
+                    "universal" in normalizedName -> 2
+                    else -> 1
+                }
+                score to downloadUrl
+            }
+            .maxByOrNull { it.first }
+            ?.second
     }
 
     private data class ParsedVersion(val parts: List<Int>, val preRelease: Boolean)
@@ -163,14 +187,16 @@ object UpdateCheckService {
 
     private fun normalizeVersion(value: String): String = value.trim().removePrefix("v").removePrefix("V")
 
-    private fun validatedReleaseUrl(value: String): String? {
+    private fun validatedDownloadUrl(value: String): String? {
         val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return null
         val path = uri.path.orEmpty()
         return value.takeIf {
             uri.scheme.equals("https", ignoreCase = true) &&
                 uri.host.equals("github.com", ignoreCase = true) &&
-                (path == "/ayyy7128/CardManager/releases" ||
-                    path.startsWith("/ayyy7128/CardManager/releases/"))
+                path.startsWith("/ayyy7128/CardManager/releases/download/") &&
+                path.endsWith(".apk", ignoreCase = true) &&
+                uri.query.isNullOrEmpty() &&
+                uri.fragment.isNullOrEmpty()
         }
     }
 }

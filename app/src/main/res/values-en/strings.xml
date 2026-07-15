@@ -240,9 +240,9 @@
     <string name="ungrouped_mode">Ungrouped mode</string>
     <string name="ungrouped_mode_summary">Show all cards directly without group sections.</string>
     <string name="tab_settings">Bottom tabs</string>
-    <string name="tab_required">Required</string>
     <string name="tab_visible">Visible</string>
     <string name="tab_hidden">Hidden</string>
+    <string name="tab_last_visible">At least one tab must remain</string>
     <string name="data_management">Data management</string>
     <string name="backup_file_name">CardManager_Backup_%1$s.cmbak</string>
     <string name="export_full_backup">Export backup</string>
@@ -295,7 +295,7 @@
     <string name="update_check_summary">Checks automatically once a day, or check now</string>
     <string name="update_available_title">Version %1$s is available</string>
     <string name="update_notes_empty">No release notes were provided for this version.</string>
-    <string name="open_release_page">Open release page</string>
+    <string name="download_update">Download update</string>
     <string name="later">Later</string>
     <string name="already_latest_version">You have the latest version (%1$s)</string>
     <string name="update_check_failed">Could not check for updates. Try again later.</string>

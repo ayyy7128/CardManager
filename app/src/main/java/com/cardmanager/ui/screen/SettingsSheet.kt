@@ -514,14 +514,18 @@ fun SettingsScreen(
                 SettingsSection(stringResource(R.string.tab_settings)) {
                     val orderedTabs = tabOrder.mapNotNull { id -> tabs.firstOrNull { it.id == id } }
                     orderedTabs.forEach { tab ->
-                        val required = tab.id == "cards" || tab.id == "data"
-                        val visible = required || tab.id in visibleOptionalTabs
+                        val visible = tab.id in visibleOptionalTabs
+                        val isLastVisible = visible && visibleOptionalTabs.size == 1
                         TabSettingRow(
                             icon = tab.icon,
                             title = stringResource(tab.labelRes),
-                            subtitle = stringResource(if (required) R.string.tab_required else if (visible) R.string.tab_visible else R.string.tab_hidden),
+                            subtitle = stringResource(
+                                if (isLastVisible) R.string.tab_last_visible
+                                else if (visible) R.string.tab_visible
+                                else R.string.tab_hidden
+                            ),
                             checked = visible,
-                            switchEnabled = !required,
+                            switchEnabled = !isLastVisible,
                             onCheckedChange = { vm.setTabVisible(tab.id, it) },
                             onMoveUp = { vm.moveTab(tab.id, -1) },
                             onMoveDown = { vm.moveTab(tab.id, 1) }
@@ -660,8 +664,8 @@ fun SettingsScreen(
         UpdateAvailableDialog(
             release = release,
             onDismiss = { availableUpdate = null },
-            onOpenRelease = {
-                UpdateCheckService.openReleasePage(ctx, release.releaseUrl)
+            onDownload = {
+                UpdateCheckService.openDownload(ctx, release.downloadUrl)
                 availableUpdate = null
             }
         )

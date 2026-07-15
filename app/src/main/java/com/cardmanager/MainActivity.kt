@@ -181,7 +181,6 @@ sealed class NavTab(val id: String, val labelRes: Int, val icon: ImageVector, va
 }
 
 val tabs = listOf(NavTab.Cards, NavTab.Calendar, NavTab.Piggy, NavTab.Data)
-private val requiredTabIds = setOf(NavTab.Cards.id, NavTab.Data.id)
 fun tabById(id: String): NavTab? = tabs.firstOrNull { it.id == id }
 
 private sealed class AppPage {
@@ -213,7 +212,6 @@ fun CardManagerApp(
     onOpenOnboarding: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var current by remember { mutableStateOf<NavTab>(NavTab.Cards) }
     var pendingPiggyAssetPlanId by remember { mutableStateOf<String?>(null) }
     var allowHiddenCurrent by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -235,9 +233,11 @@ fun CardManagerApp(
     val visibleOptionalTabs by vm.visibleOptionalTabs.collectAsState()
     val visibleTabs = remember(tabOrder, visibleOptionalTabs) {
         tabOrder.mapNotNull { tabById(it) }
-            .filter { it.id in requiredTabIds || it.id in visibleOptionalTabs }
-            .ifEmpty { listOf(NavTab.Cards, NavTab.Data) }
+            .filter { it.id in visibleOptionalTabs }
+            .ifEmpty { listOf(NavTab.Cards) }
     }
+    var current by remember { mutableStateOf(visibleTabs.first()) }
+    val floatingNavigationVisible = bottomBarVisible && visibleTabs.size > 1
 
     LaunchedEffect(Unit) {
         val result = UpdateCheckService.check(context, force = false)
@@ -252,7 +252,7 @@ fun CardManagerApp(
     LaunchedEffect(visibleTabs, current, allowHiddenCurrent) {
         when {
             current in visibleTabs -> if (allowHiddenCurrent) allowHiddenCurrent = false
-            !allowHiddenCurrent -> current = NavTab.Cards
+            !allowHiddenCurrent -> current = visibleTabs.first()
         }
     }
 
@@ -372,27 +372,27 @@ fun CardManagerApp(
                                 NavTab.Cards -> CardsScreen(
                                     vm = vm,
                                     onOpenPage = { cardPage = it },
-                                    floatingNavigationVisible = bottomBarVisible
+                                    floatingNavigationVisible = floatingNavigationVisible
                                 )
                                 NavTab.Calendar -> CalendarScreen(
                                     vm = vm,
                                     onFullscreenChanged = { sectionFullscreen = it },
                                     onOpenAssetPage = { assetPage = it },
-                                    floatingNavigationVisible = bottomBarVisible
+                                    floatingNavigationVisible = floatingNavigationVisible
                                 )
                                 NavTab.Piggy    -> PiggyScreen(
                                     vm = vm,
                                     openAssetPlanId = pendingPiggyAssetPlanId,
                                     onAssetPlanOpened = { pendingPiggyAssetPlanId = null },
                                     onOpenAssetPage = { assetPage = it },
-                                    floatingNavigationVisible = bottomBarVisible
+                                    floatingNavigationVisible = floatingNavigationVisible
                                 )
                                 NavTab.Data     -> DataScreen(vm)
                             }
                         }
                     }
                     AnimatedVisibility(
-                        visible = !sectionFullscreen && bottomBarVisible,
+                        visible = !sectionFullscreen && floatingNavigationVisible,
                         modifier = Modifier.align(Alignment.BottomCenter).zIndex(20f),
                         enter = slideInVertically(tween(220)) { it + 24 } + fadeIn(tween(180)),
                         exit = slideOutVertically(tween(220)) { it + 24 } + fadeOut(tween(180))
@@ -416,8 +416,8 @@ fun CardManagerApp(
         UpdateAvailableDialog(
             release = release,
             onDismiss = { availableUpdate = null },
-            onOpenRelease = {
-                UpdateCheckService.openReleasePage(context, release.releaseUrl)
+            onDownload = {
+                UpdateCheckService.openDownload(context, release.downloadUrl)
                 availableUpdate = null
             }
         )
@@ -463,13 +463,13 @@ fun AppBottomBar(
     Box(
         modifier
             .wrapContentWidth()
-            .padding(bottom = bottomPad + 14.dp)
+            .padding(bottom = bottomPad + 18.dp)
     ) {
-        val barShape = RoundedCornerShape(25.dp)
+        val barShape = RoundedCornerShape(26.dp)
         Box(
             Modifier
-                .height(56.dp)
-                .shadow(8.dp, barShape, clip = false)
+                .height(58.dp)
+                .shadow(9.dp, barShape, clip = false)
                 .clip(barShape)
                 .background(cs.surface)
                 .border(
@@ -486,10 +486,10 @@ fun AppBottomBar(
             ) {
                 visibleTabs.forEach { tab ->
                     val selected = current == tab
-                    val itemShape = RoundedCornerShape(21.dp)
+                    val itemShape = RoundedCornerShape(22.dp)
                     Box(
                         modifier = Modifier
-                            .width(70.dp)
+                            .width(72.dp)
                             .fillMaxHeight()
                             .clip(itemShape)
                             .background(
@@ -521,7 +521,7 @@ fun AppBottomBar(
                                 if (selected) tab.iconSelected else tab.icon,
                                 stringResource(tab.labelRes),
                                 tint = if (selected) cs.primary else cs.onSurfaceVariant,
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                             Text(
                                 stringResource(tab.labelRes),

@@ -23,7 +23,7 @@ import com.cardmanager.data.ReleaseInfo
 fun UpdateAvailableDialog(
     release: ReleaseInfo,
     onDismiss: () -> Unit,
-    onOpenRelease: () -> Unit
+    onDownload: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -44,8 +44,8 @@ fun UpdateAvailableDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onOpenRelease) {
-                Text(stringResource(R.string.open_release_page))
+            Button(onClick = onDownload) {
+                Text(stringResource(R.string.download_update))
             }
         },
         dismissButton = {

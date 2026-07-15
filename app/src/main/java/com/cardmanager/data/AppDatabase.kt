@@ -253,6 +253,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         "cardViewMode",
         "tabOrder",
         "visibleOptionalTabs",
+        "tabVisibilityAllTabs",
         "visibleDataCharts",
         "dataChartOrder",
         "visibleDataOverview",
@@ -858,6 +859,25 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                     value = restoredFontName
                 }
                 settingsByKey[key] = AppSetting(key, value)
+            }
+        }
+        if ("tabVisibilityAllTabs" !in settingsByKey) {
+            settingsByKey["visibleOptionalTabs"]?.let { legacySetting ->
+                val legacyVisible = legacySetting.value.split(",")
+                    .map { it.trim() }
+                    .filter { it in setOf("calendar", "piggy") }
+                    .toSet()
+                val migratedVisible = listOf("cards", "calendar", "piggy", "data")
+                    .filter { it in legacyVisible || it == "cards" || it == "data" }
+                    .joinToString(",")
+                settingsByKey["visibleOptionalTabs"] = AppSetting(
+                    "visibleOptionalTabs",
+                    migratedVisible
+                )
+                settingsByKey["tabVisibilityAllTabs"] = AppSetting(
+                    "tabVisibilityAllTabs",
+                    "true"
+                )
             }
         }
         if (hasImportedFontFile && restoredFontName != null) {

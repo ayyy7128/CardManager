@@ -240,9 +240,9 @@
     <string name="ungrouped_mode">無分組模式</string>
     <string name="ungrouped_mode_summary">開啟後卡片頁直接顯示所有卡片</string>
     <string name="tab_settings">底部 Tab</string>
-    <string name="tab_required">必選</string>
     <string name="tab_visible">顯示</string>
     <string name="tab_hidden">隱藏</string>
+    <string name="tab_last_visible">至少保留一個</string>
     <string name="data_management">資料管理</string>
     <string name="backup_file_name">卡片管家備份_%1$s.cmbak</string>
     <string name="export_full_backup">匯出備份</string>
@@ -295,7 +295,7 @@
     <string name="update_check_summary">每日自動檢查一次，也可在此手動檢查</string>
     <string name="update_available_title">發現新版本 %1$s</string>
     <string name="update_notes_empty">此版本未提供更新說明。</string>
-    <string name="open_release_page">開啟發布頁面</string>
+    <string name="download_update">下載更新</string>
     <string name="later">稍後</string>
     <string name="already_latest_version">已是最新版本（%1$s）</string>
     <string name="update_check_failed">檢查更新失敗，請稍後再試</string>

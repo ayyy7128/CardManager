@@ -23,7 +23,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = AppRepository(AppDatabase.get(app), app)
     private val prefs = app.getSharedPreferences("cm_settings", Context.MODE_PRIVATE)
     private val defaultTabOrder = listOf("cards", "calendar", "piggy", "data")
-    private val optionalTabIds = setOf("calendar", "piggy")
+    private val allTabIds = defaultTabOrder.toSet()
+    private val tabVisibilityAllTabsKey = "tabVisibilityAllTabs"
     private val defaultDataOverviewIds = listOf("totalCards", "groupCount", "activeCards", "totalTasks", "savingsBalance", "abnormalCards")
     private val defaultDataChartIds = listOf("status", "composition", "category", "network", "currency", "group", "taskFrequency", "taskLink", "piggyFlow")
 
@@ -68,7 +69,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val cardViewMode: StateFlow<String> = _cardViewMode
     private val _tabOrder = MutableStateFlow(sanitizeTabOrder(prefs.getString("tabOrder", defaultTabOrder.joinToString(",")) ?: defaultTabOrder.joinToString(",")))
     val tabOrder: StateFlow<List<String>> = _tabOrder
-    private val _visibleOptionalTabs = MutableStateFlow(sanitizeVisibleOptionalTabs(prefs.getString("visibleOptionalTabs", optionalTabIds.joinToString(",")) ?: optionalTabIds.joinToString(",")))
+    private val _visibleOptionalTabs = MutableStateFlow(
+        migrateVisibleTabs(
+            raw = prefs.getString("visibleOptionalTabs", "calendar,piggy") ?: "calendar,piggy",
+            usesAllTabs = prefs.getString(tabVisibilityAllTabsKey, "false").toBoolean()
+        )
+    )
     val visibleOptionalTabs: StateFlow<Set<String>> = _visibleOptionalTabs
     private val _visibleDataCharts = MutableStateFlow(sanitizeDataCharts(prefs.getString("visibleDataCharts", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
     val visibleDataCharts: StateFlow<Set<String>> = _visibleDataCharts
@@ -110,7 +116,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 sanitizeCardViewMode(savedCardViewMode)
             }
             val tabOrder = sanitizeTabOrder(repo.getSetting("tabOrder", prefs.getString("tabOrder", defaultTabOrder.joinToString(",")) ?: defaultTabOrder.joinToString(",")))
-            val visibleOptionalTabs = sanitizeVisibleOptionalTabs(repo.getSetting("visibleOptionalTabs", prefs.getString("visibleOptionalTabs", optionalTabIds.joinToString(",")) ?: optionalTabIds.joinToString(",")))
+            val usesAllTabsVisibility = repo.getSetting(
+                tabVisibilityAllTabsKey,
+                prefs.getString(tabVisibilityAllTabsKey, "false") ?: "false"
+            ).toBoolean()
+            val visibleTabs = migrateVisibleTabs(
+                raw = repo.getSetting(
+                    "visibleOptionalTabs",
+                    prefs.getString("visibleOptionalTabs", "calendar,piggy") ?: "calendar,piggy"
+                ),
+                usesAllTabs = usesAllTabsVisibility
+            )
+            val serializedVisibleTabs = serializeVisibleTabs(visibleTabs)
             val visibleDataCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", prefs.getString("visibleDataCharts", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
             val dataChartOrder = sanitizeDataChartOrder(repo.getSetting("dataChartOrder", prefs.getString("dataChartOrder", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
             val visibleDataOverview = sanitizeDataOverview(repo.getSetting("visibleDataOverview", prefs.getString("visibleDataOverview", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
@@ -124,7 +141,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("cardGalleryMode", cardGalleryMode.toString())
                 .putString("cardViewMode", cardViewMode)
                 .putString("tabOrder", tabOrder.joinToString(","))
-                .putString("visibleOptionalTabs", visibleOptionalTabs.joinToString(","))
+                .putString("visibleOptionalTabs", serializedVisibleTabs)
+                .putString(tabVisibilityAllTabsKey, "true")
                 .putString("visibleDataCharts", visibleDataCharts.joinToString(","))
                 .putString("dataChartOrder", dataChartOrder.joinToString(","))
                 .putString("visibleDataOverview", visibleDataOverview.joinToString(","))
@@ -138,7 +156,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _cardGalleryMode.value = cardGalleryMode
             _cardViewMode.value = cardViewMode
             _tabOrder.value = tabOrder
-            _visibleOptionalTabs.value = visibleOptionalTabs
+            repo.setSetting("visibleOptionalTabs", serializedVisibleTabs)
+            repo.setSetting(tabVisibilityAllTabsKey, "true")
+            _visibleOptionalTabs.value = visibleTabs
             _visibleDataCharts.value = visibleDataCharts
             _dataChartOrder.value = dataChartOrder
             _visibleDataOverview.value = visibleDataOverview
@@ -308,13 +328,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setTabVisible(tabId: String, visible: Boolean) {
-        if (tabId !in optionalTabIds) return
+        if (tabId !in allTabIds) return
         viewModelScope.launch {
-            val next = if (visible) _visibleOptionalTabs.value + tabId else _visibleOptionalTabs.value - tabId
-            val safe = sanitizeVisibleOptionalTabs(next.joinToString(","))
+            val current = _visibleOptionalTabs.value
+            if (!visible && tabId in current && current.size == 1) return@launch
+            val next = if (visible) current + tabId else current - tabId
+            val safe = sanitizeVisibleTabs(next.joinToString(","))
+            val serialized = serializeVisibleTabs(safe)
             _visibleOptionalTabs.value = safe
-            prefs.edit().putString("visibleOptionalTabs", safe.joinToString(",")).apply()
-            repo.setSetting("visibleOptionalTabs", safe.joinToString(","))
+            prefs.edit()
+                .putString("visibleOptionalTabs", serialized)
+                .putString(tabVisibilityAllTabsKey, "true")
+                .apply()
+            repo.setSetting("visibleOptionalTabs", serialized)
+            repo.setSetting(tabVisibilityAllTabsKey, "true")
         }
     }
 
@@ -354,8 +381,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             else -> "wallet"
         }
 
-    private fun sanitizeVisibleOptionalTabs(raw: String): Set<String> =
-        raw.split(",").map { it.trim() }.filter { it in optionalTabIds }.toSet()
+    private fun sanitizeVisibleTabs(raw: String): Set<String> {
+        val parsed = raw.split(",").map { it.trim() }.filter { it in allTabIds }.toSet()
+        return parsed.ifEmpty { setOf(defaultTabOrder.first()) }
+    }
+
+    private fun migrateVisibleTabs(raw: String, usesAllTabs: Boolean): Set<String> {
+        val parsed = raw.split(",").map { it.trim() }.filter { it in allTabIds }.toSet()
+        val migrated = if (usesAllTabs) parsed else parsed + setOf("cards", "data")
+        return sanitizeVisibleTabs(migrated.joinToString(","))
+    }
+
+    private fun serializeVisibleTabs(visibleTabs: Set<String>): String =
+        defaultTabOrder.filter { it in visibleTabs }.joinToString(",")
 
     private fun sanitizeThemeMode(raw: String): String =
         if (raw in setOf("system", "light", "dark")) raw else "system"
@@ -904,7 +942,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sanitizeCardViewMode(importedCardViewRaw)
         }
         val tabOrder = sanitizeTabOrder(repo.getSetting("tabOrder", _tabOrder.value.joinToString(",")))
-        val visibleTabs = sanitizeVisibleOptionalTabs(repo.getSetting("visibleOptionalTabs", _visibleOptionalTabs.value.joinToString(",")))
+        val usesAllTabsVisibility = repo.getSetting(tabVisibilityAllTabsKey, "false").toBoolean()
+        val visibleTabs = migrateVisibleTabs(
+            repo.getSetting("visibleOptionalTabs", serializeVisibleTabs(_visibleOptionalTabs.value)),
+            usesAllTabsVisibility
+        )
+        val serializedVisibleTabs = serializeVisibleTabs(visibleTabs)
         val visibleCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", _visibleDataCharts.value.joinToString(",")))
         val chartOrder = sanitizeDataChartOrder(repo.getSetting("dataChartOrder", _dataChartOrder.value.joinToString(",")))
         val visibleOverview = sanitizeDataOverview(repo.getSetting("visibleDataOverview", _visibleDataOverview.value.joinToString(",")))
@@ -939,6 +982,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _preferHighRefreshRate.value = preferHighRefreshRate
         refreshExchangeRates()
 
+        repo.setSetting("visibleOptionalTabs", serializedVisibleTabs)
+        repo.setSetting(tabVisibilityAllTabsKey, "true")
+
         prefs.edit()
             .putString("theme", theme)
             .putString("cardsPerRowPortrait", portraitRows.toString())
@@ -947,7 +993,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .putString("cardGalleryMode", cardGalleryMode.toString())
             .putString("cardViewMode", cardViewMode)
             .putString("tabOrder", tabOrder.joinToString(","))
-            .putString("visibleOptionalTabs", visibleTabs.joinToString(","))
+            .putString("visibleOptionalTabs", serializedVisibleTabs)
+            .putString(tabVisibilityAllTabsKey, "true")
             .putString("visibleDataCharts", visibleCharts.joinToString(","))
             .putString("dataChartOrder", chartOrder.joinToString(","))
             .putString("visibleDataOverview", visibleOverview.joinToString(","))
