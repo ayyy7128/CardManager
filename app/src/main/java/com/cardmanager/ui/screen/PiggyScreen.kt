@@ -189,7 +189,7 @@ fun PiggyScreen(
         val floatingNavigationBottomPadding =
             WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 20.dp
         val floatingNavigationLift by animateDpAsState(
-            targetValue = if (floatingNavigationVisible) 78.dp else 0.dp,
+            targetValue = if (floatingNavigationVisible) 66.dp else 0.dp,
             animationSpec = tween(durationMillis = 220),
             label = "piggyFabNavigationLift"
         )

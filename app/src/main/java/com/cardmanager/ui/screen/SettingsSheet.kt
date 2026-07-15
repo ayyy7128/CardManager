@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Person
@@ -109,7 +110,11 @@ import java.time.LocalDate
 private const val USDT_TRC20_ADDRESS = "TBzhjqcTLQVkKiyGY3bE94RQnoj6TAFndw"
 
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun SettingsScreen(
+    vm: MainViewModel,
+    onBack: () -> Unit,
+    onOpenOnboarding: () -> Unit = {}
+) {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
     val themeMode by vm.themeMode.collectAsState()
@@ -587,6 +592,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         title = stringResource(R.string.app_name),
                         subtitle = stringResource(R.string.version_1),
                         trailing = {}
+                    )
+                    SettingRow(
+                        icon = Icons.Default.Info,
+                        title = stringResource(R.string.onboarding_replay_title),
+                        subtitle = stringResource(R.string.onboarding_replay_summary),
+                        onClick = onOpenOnboarding,
+                        trailing = { Icon(Icons.Default.ChevronRight, null, tint = cs.onSurfaceVariant) }
                     )
                     SettingRow(
                         icon = Icons.Default.Refresh,

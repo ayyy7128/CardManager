@@ -1,5 +1,6 @@
 package com.cardmanager
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,6 +67,7 @@ const val EXTRA_WIDGET_ASSET_PLAN_ID = "com.cardmanager.extra.WIDGET_ASSET_PLAN_
 const val WIDGET_TARGET_CARDS = "cards"
 const val WIDGET_TARGET_CALENDAR = "calendar"
 const val WIDGET_TARGET_PIGGY = "piggy"
+private const val ONBOARDING_COMPLETED_KEY = "onboardingCompleted"
 
 data class WidgetLaunchRequest(
     val targetTab: String,
@@ -81,6 +84,24 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
+            val context = LocalContext.current
+            val onboardingPreferences = remember(context) {
+                context.getSharedPreferences("cm_settings", Context.MODE_PRIVATE)
+            }
+            var showOnboarding by rememberSaveable {
+                mutableStateOf(
+                    !onboardingPreferences
+                        .getString(ONBOARDING_COMPLETED_KEY, "false")
+                        .orEmpty()
+                        .toBoolean()
+                )
+            }
+            val completeOnboarding = {
+                onboardingPreferences.edit()
+                    .putString(ONBOARDING_COMPLETED_KEY, "true")
+                    .apply()
+                showOnboarding = false
+            }
             val themeMode by vm.themeMode.collectAsState()
             val preferHighRefreshRate by vm.preferHighRefreshRate.collectAsState()
             val systemDark = isSystemInDarkTheme()
@@ -95,8 +116,8 @@ class MainActivity : ComponentActivity() {
                 try {
                     val win = (view.context as android.app.Activity).window
                     WindowCompat.getInsetsController(win, view).apply {
-                        isAppearanceLightStatusBars = !isDark
-                        isAppearanceLightNavigationBars = !isDark
+                        isAppearanceLightStatusBars = showOnboarding || !isDark
+                        isAppearanceLightNavigationBars = showOnboarding || !isDark
                     }
                     val maxRefreshRate = view.display?.supportedModes?.maxOfOrNull { it.refreshRate } ?: 0f
                     win.attributes = win.attributes.apply {
@@ -104,7 +125,7 @@ class MainActivity : ComponentActivity() {
                     }
                 } catch (_: Exception) {}
             }
-            CardManagerTheme(isDark = isDark) {
+            CardManagerTheme(isDark = if (showOnboarding) false else isDark) {
                 val configuration = LocalConfiguration.current
                 val localeKey = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
                     configuration.locales.toLanguageTags()
@@ -117,11 +138,19 @@ class MainActivity : ComponentActivity() {
                     CompositionLocalProvider(
                         LocalDensity provides Density(density.density, density.fontScale.coerceAtMost(1.12f))
                     ) {
-                        CardManagerApp(
-                            vm = vm,
-                            launchRequest = widgetLaunchRequest,
-                            onLaunchRequestConsumed = { widgetLaunchRequest = null }
-                        )
+                        if (showOnboarding) {
+                            OnboardingScreen(
+                                onFinish = completeOnboarding,
+                                onSkip = completeOnboarding
+                            )
+                        } else {
+                            CardManagerApp(
+                                vm = vm,
+                                launchRequest = widgetLaunchRequest,
+                                onLaunchRequestConsumed = { widgetLaunchRequest = null },
+                                onOpenOnboarding = { showOnboarding = true }
+                            )
+                        }
                     }
                 }
             }
@@ -180,7 +209,8 @@ private fun AppPage.depth(): Int = when (this) {
 fun CardManagerApp(
     vm: MainViewModel,
     launchRequest: WidgetLaunchRequest? = null,
-    onLaunchRequestConsumed: () -> Unit = {}
+    onLaunchRequestConsumed: () -> Unit = {},
+    onOpenOnboarding: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var current by remember { mutableStateOf<NavTab>(NavTab.Cards) }
@@ -303,7 +333,11 @@ fun CardManagerApp(
                     onBack = { showSettings = false },
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    SettingsScreen(vm) { showSettings = false }
+                    SettingsScreen(
+                        vm = vm,
+                        onBack = { showSettings = false },
+                        onOpenOnboarding = onOpenOnboarding
+                    )
                 }
 
                 is AppPage.Card -> CardPageHost(
@@ -431,11 +465,11 @@ fun AppBottomBar(
             .wrapContentWidth()
             .padding(bottom = bottomPad + 14.dp)
     ) {
-        val barShape = RoundedCornerShape(30.dp)
+        val barShape = RoundedCornerShape(25.dp)
         Box(
             Modifier
-                .height(68.dp)
-                .shadow(12.dp, barShape, clip = false)
+                .height(56.dp)
+                .shadow(8.dp, barShape, clip = false)
                 .clip(barShape)
                 .background(cs.surface)
                 .border(
@@ -446,16 +480,16 @@ fun AppBottomBar(
                 )
         ) {
             Row(
-                modifier = Modifier.fillMaxHeight().padding(4.dp),
+                modifier = Modifier.fillMaxHeight().padding(2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
                 visibleTabs.forEach { tab ->
                     val selected = current == tab
-                    val itemShape = RoundedCornerShape(25.dp)
+                    val itemShape = RoundedCornerShape(21.dp)
                     Box(
                         modifier = Modifier
-                            .width(76.dp)
+                            .width(70.dp)
                             .fillMaxHeight()
                             .clip(itemShape)
                             .background(
@@ -487,12 +521,12 @@ fun AppBottomBar(
                                 if (selected) tab.iconSelected else tab.icon,
                                 stringResource(tab.labelRes),
                                 tint = if (selected) cs.primary else cs.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(19.dp)
                             )
-                            Spacer(Modifier.height(3.dp))
                             Text(
                                 stringResource(tab.labelRes),
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
+                                lineHeight = 11.sp,
                                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (selected) cs.primary else cs.onSurfaceVariant,
                                 letterSpacing = 0.sp,
