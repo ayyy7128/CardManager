@@ -38,14 +38,26 @@ object ImageStore {
         } catch (e: Exception) { "" }
     }
 
-    private fun saveBitmap(ctx: Context, bmp: Bitmap, cardId: String): String {
+    /** 从已导入的资源包复制图片，避免资源包删除后影响现有卡片。 */
+    fun saveFromFile(ctx: Context, source: File, cardId: String, preserveAlpha: Boolean = false): String {
+        return try {
+            val config = if (preserveAlpha) Bitmap.Config.ARGB_8888 else Bitmap.Config.RGB_565
+            val bmp = decodeSampled(source.absolutePath, 2400, config) ?: return ""
+            saveBitmap(ctx, bmp, cardId, preserveAlpha)
+        } catch (e: Exception) { "" }
+    }
+
+    private fun saveBitmap(ctx: Context, bmp: Bitmap, cardId: String, preserveAlpha: Boolean = false): String {
         val targetW = minOf(1200, bmp.width)
         val targetH = (bmp.height.toFloat() * targetW / bmp.width).toInt()
         val scaled = Bitmap.createScaledBitmap(bmp, targetW, targetH, true)
-        val file = File(dir(ctx), "${cardId}_${System.currentTimeMillis()}.jpg")
+        val extension = if (preserveAlpha) "png" else "jpg"
+        val format = if (preserveAlpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+        val file = File(dir(ctx), "${cardId}_${System.currentTimeMillis()}.$extension")
         FileOutputStream(file).use { out ->
-            scaled.compress(Bitmap.CompressFormat.JPEG, 97, out)
+            scaled.compress(format, 97, out)
         }
+        if (scaled !== bmp) bmp.recycle()
         bitmapCache.put(cacheKey(file.absolutePath, 0), scaled)
         return file.absolutePath
     }
@@ -59,6 +71,11 @@ object ImageStore {
         return if (maxDimension > 0) bitmapCache.get(cacheKey(path, 0)) else null
     }
 
+    fun peekAsset(assetPath: String, maxDimension: Int = 0): Bitmap? {
+        if (assetPath.isEmpty()) return null
+        return peek(assetCachePath(assetPath), maxDimension)
+    }
+
     /** 加载图片（返回 Bitmap 或 null） */
     fun load(path: String, maxDimension: Int = 0): Bitmap? {
         if (path.isEmpty()) return null
@@ -70,7 +87,28 @@ object ImageStore {
         } catch (e: Exception) { null }
     }
 
-    private fun decodeSampled(path: String, maxDimension: Int): Bitmap? {
+    fun loadAsset(ctx: Context, assetPath: String, maxDimension: Int = 0): Bitmap? {
+        if (assetPath.isEmpty()) return null
+        val cachePath = assetCachePath(assetPath)
+        val key = cacheKey(cachePath, maxDimension)
+        bitmapCache.get(key)?.let { return it }
+        return try {
+            val decoded = ctx.assets.open(assetPath).use { input ->
+                BitmapFactory.decodeStream(input)
+            } ?: return null
+            val result = scaleToMaxDimension(decoded, maxDimension)
+            bitmapCache.put(key, result)
+            result
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun decodeSampled(
+        path: String,
+        maxDimension: Int,
+        preferredConfig: Bitmap.Config = Bitmap.Config.RGB_565
+    ): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
         val maxSource = maxOf(bounds.outWidth, bounds.outHeight)
@@ -79,7 +117,7 @@ object ImageStore {
         while (maxSource / (sample * 2) >= maxDimension) sample *= 2
         val options = BitmapFactory.Options().apply {
             inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.RGB_565
+            inPreferredConfig = preferredConfig
         }
         val decoded = BitmapFactory.decodeFile(path, options) ?: return null
         val decodedMax = maxOf(decoded.width, decoded.height)
@@ -91,6 +129,20 @@ object ImageStore {
         if (scaled !== decoded) decoded.recycle()
         return scaled
     }
+
+    private fun scaleToMaxDimension(bitmap: Bitmap, maxDimension: Int): Bitmap {
+        if (maxDimension <= 0) return bitmap
+        val sourceMax = maxOf(bitmap.width, bitmap.height)
+        if (sourceMax <= maxDimension) return bitmap
+        val scale = maxDimension.toFloat() / sourceMax
+        val targetW = (bitmap.width * scale).toInt().coerceAtLeast(1)
+        val targetH = (bitmap.height * scale).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+        if (scaled !== bitmap) bitmap.recycle()
+        return scaled
+    }
+
+    private fun assetCachePath(assetPath: String): String = "asset://$assetPath"
 
     /** 删除图片文件 */
     fun delete(path: String) {

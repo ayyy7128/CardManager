@@ -519,16 +519,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     fun deleteCard(c: Card) { viewModelScope.launch { repo.deleteCard(c) } }
-    fun saveBankLogo(card: Card, uri: Uri) {
-        viewModelScope.launch {
-            val path = ImageStore.saveFromUri(getApplication(), uri, "bank_${card.id}")
-            if (path.isNotEmpty()) {
-                repo.updateCard(card.copy(bankLogoPath = path))
-                _imageVersion.value += 1
-            }
-        }
-    }
-
     fun saveCardImage(card: Card, uri: Uri) {
         viewModelScope.launch {
             val path = ImageStore.saveFromUri(getApplication(), uri, card.id)

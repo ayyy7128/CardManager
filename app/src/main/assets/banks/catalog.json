@@ -1,0 +1,957 @@
+{
+  "formatVersion": 1,
+  "banks": [
+    {
+      "name": "イオンカード",
+      "english": "Aeon Card (Aeon Credit Service)",
+      "section": "A",
+      "sortKey": "aeon card (aeon credit service)",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "American Express",
+      "english": "American Express",
+      "section": "A",
+      "sortKey": "american express",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "安徽农信",
+      "english": "Anhui Rural Credit Cooperative Union",
+      "section": "A",
+      "sortKey": "anhui rural credit cooperative union",
+      "logo": "banks/logos/f6f988fb917018f3.webp",
+      "aliases": []
+    },
+    {
+      "name": "アプラス",
+      "english": "APLUS",
+      "section": "A",
+      "sortKey": "aplus",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Apple",
+      "english": "Apple",
+      "section": "A",
+      "sortKey": "apple",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "アークスRARAカード",
+      "english": "ARCS RARA Card",
+      "section": "A",
+      "sortKey": "arcs rara card",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Bank of America",
+      "english": "Bank of America",
+      "section": "B",
+      "sortKey": "bank of america",
+      "logo": "banks/logos/a05e199ed203d219.webp",
+      "aliases": []
+    },
+    {
+      "name": "北京银行",
+      "english": "Bank of Beijing",
+      "section": "B",
+      "sortKey": "bank of beijing",
+      "logo": "banks/logos/9561f995fb1b0cf7.webp",
+      "aliases": []
+    },
+    {
+      "name": "渤海银行",
+      "english": "China Bohai Bank",
+      "section": "B",
+      "sortKey": "china bohai bank",
+      "logo": "banks/logos/1f0b45e92a4c10d6.webp",
+      "aliases": []
+    },
+    {
+      "name": "八達通卡",
+      "english": "Octopus Cards",
+      "section": "B",
+      "sortKey": "octopus cards",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "长沙银行",
+      "english": "Bank of Changsha",
+      "section": "C",
+      "sortKey": "bank of changsha",
+      "logo": "banks/logos/e881121a1eb1cb4d.webp",
+      "aliases": []
+    },
+    {
+      "name": "成都银行",
+      "english": "Bank of Chengdu",
+      "section": "C",
+      "sortKey": "bank of chengdu",
+      "logo": "banks/logos/b09d1dcc600aaeaf.webp",
+      "aliases": []
+    },
+    {
+      "name": "重庆银行",
+      "english": "Bank of Chongqing",
+      "section": "C",
+      "sortKey": "bank of chongqing",
+      "logo": "banks/logos/0c733e322f5fae22.webp",
+      "aliases": []
+    },
+    {
+      "name": "Chase",
+      "english": "Chase",
+      "section": "C",
+      "sortKey": "chase",
+      "logo": "banks/logos/1d0987c0929c0e8a.webp",
+      "aliases": []
+    },
+    {
+      "name": "Chase UK",
+      "english": "Chase UK",
+      "section": "C",
+      "sortKey": "chase uk",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Chime",
+      "english": "Chime",
+      "section": "C",
+      "sortKey": "chime",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "重庆农商银行",
+      "english": "Chongqing Rural Commercial Bank",
+      "section": "C",
+      "sortKey": "chongqing rural commercial bank",
+      "logo": "banks/logos/4a6256ea49de39d8.webp",
+      "aliases": []
+    },
+    {
+      "name": "Commonwealth Bank of Australia",
+      "english": "Commonwealth Bank of Australia",
+      "section": "C",
+      "sortKey": "commonwealth bank of australia",
+      "logo": "banks/logos/b714ef59ef57a7f6.webp",
+      "aliases": []
+    },
+    {
+      "name": "DasherDirect",
+      "english": "DasherDirect",
+      "section": "D",
+      "sortKey": "dasherdirect",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Deep Blue",
+      "english": "Deep Blue",
+      "section": "D",
+      "sortKey": "deep blue",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "第一銀行",
+      "english": "First Commercial BankBank",
+      "section": "D",
+      "sortKey": "first commercial bankbank",
+      "logo": "banks/logos/d52673d98bdefc65.webp",
+      "aliases": []
+    },
+    {
+      "name": "东亚银行 (中国)",
+      "english": "The Bank of East Asia (China)",
+      "section": "D",
+      "sortKey": "the bank of east asia (china)",
+      "logo": "banks/logos/c9804bab8f7234ae.webp",
+      "aliases": []
+    },
+    {
+      "name": "ENEOS カード",
+      "english": "ENEOS Card",
+      "section": "E",
+      "sortKey": "eneos card",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "first direct bank",
+      "english": "first direct bank",
+      "section": "F",
+      "sortKey": "first direct bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Fiat24",
+      "english": "Fiat24",
+      "section": "F",
+      "sortKey": "fiat24",
+      "logo": "banks/logos/4c929c32cd0e153f.webp",
+      "aliases": []
+    },
+    {
+      "name": "富邦华一银行",
+      "english": "Fubon Bank (China)",
+      "section": "F",
+      "sortKey": "fubon bank (china)",
+      "logo": "banks/logos/0e36b61b4e754979.webp",
+      "aliases": []
+    },
+    {
+      "name": "赣州银行",
+      "english": "Bank of GanZhou",
+      "section": "G",
+      "sortKey": "bank of ganzhou",
+      "logo": "banks/logos/c5a3e4291e3133b1.webp",
+      "aliases": []
+    },
+    {
+      "name": "國泰世華銀行",
+      "english": "Cathay United Bank",
+      "section": "G",
+      "sortKey": "cathay united bank",
+      "logo": "banks/logos/f4ff38536a75b833.webp",
+      "aliases": []
+    },
+    {
+      "name": "光大银行",
+      "english": "China Everbright Bank",
+      "section": "G",
+      "sortKey": "china everbright bank",
+      "logo": "banks/logos/b724ddcec8bc9cba.webp",
+      "aliases": []
+    },
+    {
+      "name": "广发银行",
+      "english": "China Guangfa Bank",
+      "section": "G",
+      "sortKey": "china guangfa bank",
+      "logo": "banks/logos/d7a05d322b0b080f.webp",
+      "aliases": []
+    },
+    {
+      "name": "杭州银行",
+      "english": "Bank of Hangzhou",
+      "section": "H",
+      "sortKey": "bank of hangzhou",
+      "logo": "banks/logos/4e83f9575781b726.webp",
+      "aliases": []
+    },
+    {
+      "name": "湖南银行",
+      "english": "Bank of Hunan",
+      "section": "H",
+      "sortKey": "bank of hunan",
+      "logo": "banks/logos/a379c6738466106c.webp",
+      "aliases": []
+    },
+    {
+      "name": "花旗银行 (中国)",
+      "english": "Citibank (China)",
+      "section": "H",
+      "sortKey": "citibank (china)",
+      "logo": "banks/logos/39ac568f1f2789ca.webp",
+      "aliases": []
+    },
+    {
+      "name": "花旗銀行 (台灣)",
+      "english": "Citibank (TAIWAN)",
+      "section": "H",
+      "sortKey": "citibank (taiwan)",
+      "logo": "banks/logos/39ac568f1f2789ca.webp",
+      "aliases": []
+    },
+    {
+      "name": "恒生銀行",
+      "english": "Hang Seng Bank",
+      "section": "H",
+      "sortKey": "hang seng bank",
+      "logo": "banks/logos/0f1b3c1321902d3e.webp",
+      "aliases": []
+    },
+    {
+      "name": "HSBC Bank (Australia)",
+      "english": "HSBC Bank (Australia)",
+      "section": "H",
+      "sortKey": "hsbc bank (australia)",
+      "logo": "banks/logos/9b6ea48b511ffd60.webp",
+      "aliases": []
+    },
+    {
+      "name": "HSBC Bank (Canada)",
+      "english": "HSBC Bank (Canada)",
+      "section": "H",
+      "sortKey": "hsbc bank (canada)",
+      "logo": "banks/logos/9b6ea48b511ffd60.webp",
+      "aliases": []
+    },
+    {
+      "name": "汇丰银行 (中国)",
+      "english": "HSBC Bank (China)",
+      "section": "H",
+      "sortKey": "hsbc bank (china)",
+      "logo": "banks/logos/9b6ea48b511ffd60.webp",
+      "aliases": []
+    },
+    {
+      "name": "HSBC Bank (United Kingdom)",
+      "english": "HSBC Bank (United Kingdom)",
+      "section": "H",
+      "sortKey": "hsbc bank (united kingdom)",
+      "logo": "banks/logos/9b6ea48b511ffd60.webp",
+      "aliases": []
+    },
+    {
+      "name": "HSBC Bank (USA)",
+      "english": "HSBC Bank (USA)",
+      "section": "H",
+      "sortKey": "hsbc bank (usa)",
+      "logo": "banks/logos/9b6ea48b511ffd60.webp",
+      "aliases": []
+    },
+    {
+      "name": "华夏银行",
+      "english": "Hua Xia Bank",
+      "section": "H",
+      "sortKey": "hua xia bank",
+      "logo": "banks/logos/8734c0be9352ece3.webp",
+      "aliases": []
+    },
+    {
+      "name": "匯立銀行",
+      "english": "WeLab Bank",
+      "section": "H",
+      "sortKey": "welab bank",
+      "logo": "banks/logos/5d597d17e17f3101.webp",
+      "aliases": [
+        "汇立银行"
+      ]
+    },
+    {
+      "name": "交通银行",
+      "english": "Bank of Communications",
+      "section": "J",
+      "sortKey": "bank of communications",
+      "logo": "banks/logos/62119fa617048981.webp",
+      "aliases": []
+    },
+    {
+      "name": "江苏银行",
+      "english": "Bank of Jiangsu",
+      "section": "J",
+      "sortKey": "bank of jiangsu",
+      "logo": "banks/logos/a4b5cca455ecd1e0.webp",
+      "aliases": []
+    },
+    {
+      "name": "嘉兴银行",
+      "english": "Bank of Jiaxing",
+      "section": "J",
+      "sortKey": "bank of jiaxing",
+      "logo": "banks/logos/ca66fd7584f086b4.webp",
+      "aliases": []
+    },
+    {
+      "name": "吉林银行",
+      "english": "Bank of Jilin",
+      "section": "J",
+      "sortKey": "bank of jilin",
+      "logo": "banks/logos/b3759bef2c4b1880.webp",
+      "aliases": []
+    },
+    {
+      "name": "金华银行",
+      "english": "Bank of Jinhua",
+      "section": "J",
+      "sortKey": "bank of jinhua",
+      "logo": "banks/logos/20f42453cc40fa6e.webp",
+      "aliases": []
+    },
+    {
+      "name": "九江银行",
+      "english": "Bank of Jiujiang",
+      "section": "J",
+      "sortKey": "bank of jiujiang",
+      "logo": "banks/logos/8becc0b4e366ab71.webp",
+      "aliases": []
+    },
+    {
+      "name": "JCBクレジットカード",
+      "english": "JCB International Credit Card",
+      "section": "J",
+      "sortKey": "jcb international credit card",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "京东金融",
+      "english": "JD Finance",
+      "section": "J",
+      "sortKey": "jd finance",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "江西省农村信用社(农商银行)",
+      "english": "Jiang Xi Rural Commercial United Bank",
+      "section": "J",
+      "sortKey": "jiang xi rural commercial united bank",
+      "logo": "banks/logos/9633787368c67f70.webp",
+      "aliases": []
+    },
+    {
+      "name": "理慧銀行",
+      "english": "livi Bank",
+      "section": "L",
+      "sortKey": "livi bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "聯邦銀行",
+      "english": "Union Bank Of Taiwan",
+      "section": "L",
+      "sortKey": "union bank of taiwan",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "立橋銀行",
+      "english": "Well Link Bank",
+      "section": "L",
+      "sortKey": "well link bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "民生银行",
+      "english": "China Minsheng Bank",
+      "section": "M",
+      "sortKey": "china minsheng bank",
+      "logo": "banks/logos/d177ef7f1d911e4d.webp",
+      "aliases": []
+    },
+    {
+      "name": "蚂蚁银行（香港）",
+      "english": "Ant Bank (Hong Kong)",
+      "section": "M",
+      "sortKey": "ant bank hong kong",
+      "logo": "banks/logos/e0a175a867db0d12.webp",
+      "aliases": [
+        "螞蟻銀行（香港）",
+        "蚂蚁银行香港",
+        "Ant Bank Hong Kong"
+      ]
+    },
+    {
+      "name": "蚂蚁银行（澳门）",
+      "english": "Ant Bank (Macao)",
+      "section": "M",
+      "sortKey": "ant bank macao",
+      "logo": "banks/logos/e0a175a867db0d12.webp",
+      "aliases": [
+        "螞蟻銀行（澳門）",
+        "蚂蚁银行澳门",
+        "Ant Bank Macau"
+      ]
+    },
+    {
+      "name": "みずほ銀行",
+      "english": "Mizuho Bank",
+      "section": "M",
+      "sortKey": "mizuho bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Monzo Bank",
+      "english": "Monzo Bank",
+      "section": "M",
+      "sortKey": "monzo bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "内蒙古银行",
+      "english": "Bank of Inner Mongolia",
+      "section": "N",
+      "sortKey": "bank of inner mongolia",
+      "logo": "banks/logos/0ea42eeeaa4bd959.webp",
+      "aliases": []
+    },
+    {
+      "name": "宁波银行",
+      "english": "Bank of NingBo",
+      "section": "N",
+      "sortKey": "bank of ningbo",
+      "logo": "banks/logos/51f682d10d6b6f09.webp",
+      "aliases": []
+    },
+    {
+      "name": "N26",
+      "english": "N26",
+      "section": "N",
+      "sortKey": "n26",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Netspend",
+      "english": "Netspend",
+      "section": "N",
+      "sortKey": "netspend",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "オリコ",
+      "english": "Orico",
+      "section": "O",
+      "sortKey": "orico",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Oversea-Chinese Banking Corporation",
+      "english": "Oversea-Chinese Banking Corporation",
+      "section": "O",
+      "sortKey": "oversea-chinese banking corporation",
+      "logo": "banks/logos/930654503a3d1683.webp",
+      "aliases": []
+    },
+    {
+      "name": "Payoneer",
+      "english": "Payoneer",
+      "section": "P",
+      "sortKey": "payoneer",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "PayPal",
+      "english": "PayPal",
+      "section": "P",
+      "sortKey": "paypal",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Permanent TSB",
+      "english": "Permanent TSB",
+      "section": "P",
+      "sortKey": "permanent tsb",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "平安银行",
+      "english": "Ping An Bank",
+      "section": "P",
+      "sortKey": "ping an bank",
+      "logo": "banks/logos/556249dda2603dfb.webp",
+      "aliases": []
+    },
+    {
+      "name": "浦发银行",
+      "english": "Shanghai Pudong Development Bank",
+      "section": "P",
+      "sortKey": "shanghai pudong development bank",
+      "logo": "banks/logos/aa019488db37f5bb.webp",
+      "aliases": []
+    },
+    {
+      "name": "拍住賞",
+      "english": "Tap & Go",
+      "section": "P",
+      "sortKey": "tap & go",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "青海银行",
+      "english": "Bank of Qinghai",
+      "section": "Q",
+      "sortKey": "bank of qinghai",
+      "logo": "banks/logos/017538218a9778f9.webp",
+      "aliases": []
+    },
+    {
+      "name": "千葉銀行",
+      "english": "Chiba Bank",
+      "section": "Q",
+      "sortKey": "chiba bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "楽天カード",
+      "english": "Rakuten Card",
+      "section": "R",
+      "sortKey": "rakuten card",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Revolut Australia",
+      "english": "Revolut Australia",
+      "section": "R",
+      "sortKey": "revolut australia",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "上海银行",
+      "english": "Bank of Shanghai",
+      "section": "S",
+      "sortKey": "bank of shanghai",
+      "logo": "banks/logos/a6fa8812cfe1a44f.webp",
+      "aliases": []
+    },
+    {
+      "name": "苏州银行",
+      "english": "Bank of Suzhou",
+      "section": "S",
+      "sortKey": "bank of suzhou",
+      "logo": "banks/logos/00d401bbab83da7f.webp",
+      "aliases": []
+    },
+    {
+      "name": "S1lkpay",
+      "english": "S1lkpay",
+      "section": "S",
+      "sortKey": "s1lkpay",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Santander UK",
+      "english": "Santander UK",
+      "section": "S",
+      "sortKey": "santander uk",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "盛京银行",
+      "english": "Shengjing Bank",
+      "section": "S",
+      "sortKey": "shengjing bank",
+      "logo": "banks/logos/26818b0aa8bd2d8c.webp",
+      "aliases": []
+    },
+    {
+      "name": "渣打银行 (中国)",
+      "english": "Standard Chartered Bank (China)",
+      "section": "S",
+      "sortKey": "standard chartered bank (china)",
+      "logo": "banks/logos/8eae9270c0bde560.webp",
+      "aliases": []
+    },
+    {
+      "name": "Starling Bank",
+      "english": "Starling Bank",
+      "section": "S",
+      "sortKey": "starling bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "深圳前海微众银行",
+      "english": "WeBank",
+      "section": "S",
+      "sortKey": "webank",
+      "logo": "banks/logos/49336cc5a9dbfd64.webp",
+      "aliases": []
+    },
+    {
+      "name": "象象银行",
+      "english": "Elebank",
+      "section": "X",
+      "sortKey": "elebank",
+      "logo": "",
+      "aliases": [
+        "天星银行",
+        "天星銀行",
+        "Airstar Bank"
+      ]
+    },
+    {
+      "name": "唐山银行",
+      "english": "Bank of Tangshan",
+      "section": "T",
+      "sortKey": "bank of tangshan",
+      "logo": "banks/logos/073fab206e566faa.webp",
+      "aliases": []
+    },
+    {
+      "name": "台北富邦銀行",
+      "english": "Taipei Fubon Commercial Bank",
+      "section": "T",
+      "sortKey": "taipei fubon commercial bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "台新銀行",
+      "english": "Taishin International Bank",
+      "section": "T",
+      "sortKey": "taishin international bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "トヨタファイナンス",
+      "english": "Toyota Finance Corporation",
+      "section": "T",
+      "sortKey": "toyota finance corporation",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Trading 212",
+      "english": "Trading 212",
+      "section": "T",
+      "sortKey": "trading 212",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "UCSカード",
+      "english": "UCS Card",
+      "section": "U",
+      "sortKey": "ucs card",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "温州银行",
+      "english": "Bank of Wenzhou",
+      "section": "W",
+      "sortKey": "bank of wenzhou",
+      "logo": "banks/logos/932d03231fd40170.webp",
+      "aliases": []
+    },
+    {
+      "name": "兴业银行",
+      "english": "China Industrial Bank",
+      "section": "X",
+      "sortKey": "china industrial bank",
+      "logo": "banks/logos/65886f285b393964.webp",
+      "aliases": []
+    },
+    {
+      "name": "星展银行 (中国)",
+      "english": "DBS Bank (China)",
+      "section": "X",
+      "sortKey": "dbs bank (china)",
+      "logo": "banks/logos/895bea1fcfca6b4c.webp",
+      "aliases": []
+    },
+    {
+      "name": "星展銀行 (台灣)",
+      "english": "DBS Bank (Taiwan)",
+      "section": "X",
+      "sortKey": "dbs bank (taiwan)",
+      "logo": "banks/logos/895bea1fcfca6b4c.webp",
+      "aliases": []
+    },
+    {
+      "name": "香港上海滙豐銀行",
+      "english": "The Hongkong and Shanghai Banking Corporation",
+      "section": "X",
+      "sortKey": "the hongkong and shanghai banking corporation",
+      "logo": "banks/logos/9b6ea48b511ffd60.webp",
+      "aliases": []
+    },
+    {
+      "name": "永豐銀行",
+      "english": "Bank SinoPac",
+      "section": "Y",
+      "sortKey": "bank sinopac",
+      "logo": "banks/logos/6d8ada498cf810b6.webp",
+      "aliases": []
+    },
+    {
+      "name": "玉山銀行",
+      "english": "E.SUN Commercial Bank",
+      "section": "Y",
+      "sortKey": "e.sun commercial bank",
+      "logo": "banks/logos/de58447bfc6c9c82.webp",
+      "aliases": []
+    },
+    {
+      "name": "ЮMoney",
+      "english": "YooMoney",
+      "section": "Y",
+      "sortKey": "yoomoney",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "中国农业银行",
+      "english": "Agricultural Bank of China",
+      "section": "Z",
+      "sortKey": "agricultural bank of china",
+      "logo": "banks/logos/6cdbb4c544ba1e21.webp",
+      "aliases": []
+    },
+    {
+      "name": "中国银行",
+      "english": "Bank of China",
+      "section": "Z",
+      "sortKey": "bank of china",
+      "logo": "banks/logos/caf76992859b35e9.webp",
+      "aliases": []
+    },
+    {
+      "name": "中國銀行 (香港)",
+      "english": "Bank of China (Hong Kong)",
+      "section": "Z",
+      "sortKey": "bank of china (hong kong)",
+      "logo": "banks/logos/caf76992859b35e9.webp",
+      "aliases": []
+    },
+    {
+      "name": "中信银行",
+      "english": "China Citic Bank",
+      "section": "Z",
+      "sortKey": "china citic bank",
+      "logo": "banks/logos/592de55f9c15c660.webp",
+      "aliases": []
+    },
+    {
+      "name": "中国建设银行",
+      "english": "China Construction Bank",
+      "section": "Z",
+      "sortKey": "china construction bank",
+      "logo": "banks/logos/15df9e55adb60aea.webp",
+      "aliases": []
+    },
+    {
+      "name": "招商银行",
+      "english": "China Merchants Bank",
+      "section": "Z",
+      "sortKey": "china merchants bank",
+      "logo": "banks/logos/4e721fae5963494d.webp",
+      "aliases": []
+    },
+    {
+      "name": "浙商银行",
+      "english": "China Zheshang Bank",
+      "section": "Z",
+      "sortKey": "china zheshang bank",
+      "logo": "banks/logos/603bfd30d1541967.webp",
+      "aliases": []
+    },
+    {
+      "name": "中國信託銀行",
+      "english": "CTBC Bank",
+      "section": "Z",
+      "sortKey": "ctbc bank",
+      "logo": "banks/logos/8d90b68ca8521b76.webp",
+      "aliases": []
+    },
+    {
+      "name": "中国工商银行",
+      "english": "Industrial and Commercial Bank of China",
+      "section": "Z",
+      "sortKey": "industrial and commercial bank of china",
+      "logo": "banks/logos/e7e901fd1d79de18.webp",
+      "aliases": []
+    },
+    {
+      "name": "中國工商銀行（亞洲）",
+      "english": "Industrial and Commercial Bank of China (Asia)",
+      "section": "Z",
+      "sortKey": "industrial and commercial bank of china (asia)",
+      "logo": "banks/logos/e7e901fd1d79de18.webp",
+      "aliases": []
+    },
+    {
+      "name": "兆豐銀行",
+      "english": "Mega International Commercial Bank",
+      "section": "Z",
+      "sortKey": "mega international commercial bank",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "中国邮政储蓄银行",
+      "english": "Postal Savings Bank of China",
+      "section": "Z",
+      "sortKey": "postal savings bank of china",
+      "logo": "banks/logos/f112198ca6d5bcfe.webp",
+      "aliases": []
+    },
+    {
+      "name": "眾安銀行",
+      "english": "ZA Bank",
+      "section": "Z",
+      "sortKey": "za bank",
+      "logo": "banks/logos/800b93c69eb46af9.webp",
+      "aliases": [
+        "众安银行"
+      ]
+    },
+    {
+      "name": "浙江稠州商业银行",
+      "english": "Zhejiang Chouzhou Commercial Bank",
+      "section": "Z",
+      "sortKey": "zhejiang chouzhou commercial bank",
+      "logo": "banks/logos/8462cc6838ab11ff.webp",
+      "aliases": []
+    },
+    {
+      "name": "浙江民泰商业银行",
+      "english": "Zhejiang Mintai Commercial Bank",
+      "section": "Z",
+      "sortKey": "zhejiang mintai commercial bank",
+      "logo": "banks/logos/8bc096a077b9fea2.webp",
+      "aliases": []
+    },
+    {
+      "name": "浙江农商联合银行",
+      "english": "Zhejiang Rural Commercial United Bank",
+      "section": "Z",
+      "sortKey": "zhejiang rural commercial united bank",
+      "logo": "banks/logos/f5183d2338bbeff5.webp",
+      "aliases": []
+    },
+    {
+      "name": "浙江泰隆商业银行",
+      "english": "Zhejiang Tailong Commercial Bank",
+      "section": "Z",
+      "sortKey": "zhejiang tailong commercial bank",
+      "logo": "banks/logos/a87f7f11e6e1f06b.webp",
+      "aliases": []
+    },
+    {
+      "name": "Zilch",
+      "english": "Zilch",
+      "section": "Z",
+      "sortKey": "zilch",
+      "logo": "",
+      "aliases": []
+    },
+    {
+      "name": "Zing",
+      "english": "Zing",
+      "section": "Z",
+      "sortKey": "zing",
+      "logo": "",
+      "aliases": []
+    }
+  ]
+}

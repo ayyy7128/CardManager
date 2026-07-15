@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -39,6 +40,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.view.WindowCompat
 import com.cardmanager.R
+import com.cardmanager.data.ReleaseInfo
+import com.cardmanager.data.UpdateCheckResult
+import com.cardmanager.data.UpdateCheckService
+import com.cardmanager.ui.components.UpdateAvailableDialog
 import com.cardmanager.ui.screen.*
 import com.cardmanager.ui.theme.*
 import com.cardmanager.viewmodel.MainViewModel
@@ -145,10 +150,12 @@ fun CardManagerApp(
     launchRequest: WidgetLaunchRequest? = null,
     onLaunchRequestConsumed: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var current by remember { mutableStateOf<NavTab>(NavTab.Cards) }
     var pendingPiggyAssetPlanId by remember { mutableStateOf<String?>(null) }
     var allowHiddenCurrent by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
     val themeMode by vm.themeMode.collectAsState()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
@@ -162,6 +169,16 @@ fun CardManagerApp(
         tabOrder.mapNotNull { tabById(it) }
             .filter { it.id in requiredTabIds || it.id in visibleOptionalTabs }
             .ifEmpty { listOf(NavTab.Cards, NavTab.Data) }
+    }
+
+    LaunchedEffect(Unit) {
+        val result = UpdateCheckService.check(context, force = false)
+        if (result is UpdateCheckResult.Available &&
+            UpdateCheckService.shouldPromptAutomatically(context, result.release.versionName)
+        ) {
+            UpdateCheckService.markAutomaticallyPrompted(context, result.release.versionName)
+            availableUpdate = result.release
+        }
     }
 
     LaunchedEffect(visibleTabs, current, allowHiddenCurrent) {
@@ -226,6 +243,17 @@ fun CardManagerApp(
             }
         }
     }
+
+    availableUpdate?.let { release ->
+        UpdateAvailableDialog(
+            release = release,
+            onDismiss = { availableUpdate = null },
+            onOpenRelease = {
+                UpdateCheckService.openReleasePage(context, release.releaseUrl)
+                availableUpdate = null
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -236,7 +264,7 @@ fun AppTopBar(tab: NavTab, isDark: Boolean, onSettings: () -> Unit) {
 
     Surface(Modifier.fillMaxWidth(), color = cs.surface, tonalElevation = 0.dp, shadowElevation = 0.dp) {
         Column(Modifier.fillMaxWidth().padding(top = statusPad)) {
-            Row(Modifier.fillMaxWidth().padding(start = 22.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 22.dp, end = 10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(tab.labelRes), fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
                     color = cs.onSurface, letterSpacing = 0.sp, modifier = Modifier.weight(1f))
@@ -259,12 +287,13 @@ fun AppBottomBar(visibleTabs: List<NavTab>, current: NavTab, onSelect: (NavTab) 
     val cs = MaterialTheme.colorScheme
     val bottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Surface(Modifier.fillMaxWidth(), color = cs.surface, shadowElevation = 0.dp, tonalElevation = 0.dp) {
-        Column {
+        Column(Modifier.padding(bottom = bottomPad.coerceAtLeast(4.dp))) {
             HorizontalDivider(color = cs.outline.copy(alpha = 0.18f))
             NavigationBar(
-                modifier = Modifier.padding(bottom = bottomPad.coerceAtLeast(4.dp)),
+                modifier = Modifier.height(64.dp),
                 containerColor = cs.surface,
-                tonalElevation = 0.dp
+                tonalElevation = 0.dp,
+                windowInsets = WindowInsets(0)
             ) {
                 visibleTabs.forEach { tab ->
                     val selected = current == tab

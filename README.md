@@ -4,7 +4,7 @@
 
 数据默认保存在本机，不做云同步，不上传个人信息。
 
-当前版本：**2.2.1**
+当前版本：**2.3.0**
 
 ## 功能亮点
 
@@ -16,16 +16,61 @@
 - 非交易日：投资任务可自动判断非交易日，并支持顺延到下一个交易日。
 - 数据统计：支持卡片状态、卡组织、币种、分组、任务频率、小金库等本地统计。
 - 备份恢复：使用 `.cmbak` 导入导出备份，覆盖卡片、任务、小金库、设置和图片资源。
+- 资源包：支持标准 `.zip` 卡片资源包导入与管理，可扩展卡面和银行 Logo。
 - 个性化：支持深色模式、自定义字体、卡面布局、底部 Tab 和数据页显示项调整。
 
-## 2.2.1 更新
+## 2.3.0 更新
 
-- 覆盖导入会先完整解析并验证备份，再在单个 Room 事务中替换数据，降低损坏备份影响现有数据的风险。
-- 备份 JSON 使用系统 JSON 转义规则，避免备注等文本中的控制字符损坏备份。
-- 新导出的 `.cmbak` 必须设置密码；旧版无密码备份保持导入兼容。
-- 未来日期的初始资金和资金调整只在生效日期到达后计入投资项目余额。
-- 小组件在任务、快速记录、投资项目和显示币种变化后主动刷新，并共用最近一次成功汇率缓存。
-- 删除卡片或分组时，投资项目会保留并解除关联。
+- 新增标准 `.zip` 卡片资源包导入和管理，不增加 APK 体积。
+- 卡片编辑页新增卡面资源库，可搜索、筛选并自动填写银行、卡名、卡组织、卡类型、币种和可用 Logo。
+- 选用资源卡面时会把卡面和 Logo 复制到卡片目录，删除资源包不会影响已有卡片。
+- 仓库提供公开 ZIP 目录与 JSON 清单规范，不提供第三方下载脚本、卡面或 Logo 素材。
+- 交易日缓存按 7 天更新，联网失败时优先使用已有缓存。
+
+## ZIP 资源包格式
+
+卡片资源包是标准 `.zip` 文件，根目录必须直接包含 `manifest.json`，不能在外层再套一层文件夹：
+
+```text
+manifest.json
+images/
+  card-001.png
+logos/
+  bank-001.png
+failed-images.json
+failed-logos.json
+```
+
+最小 `manifest.json` 示例：
+
+```json
+{
+  "format": "cardmanager-resource-pack",
+  "formatVersion": 1,
+  "id": "example-bank-cards",
+  "name": "Example Bank Cards",
+  "version": "2026.07",
+  "items": [
+    {
+      "id": "example-card-001",
+      "name": "Example Platinum Card",
+      "bank": "Example Bank",
+      "network": "VISA",
+      "cardCategory": "信用卡",
+      "currency": "USD",
+      "image": "images/card-001.png",
+      "bankLogo": "logos/bank-001.png"
+    }
+  ]
+}
+```
+
+- `format` 固定为 `cardmanager-resource-pack`，`formatVersion` 当前为 `1`。
+- `id` 只允许字母、数字、点、下划线和连字符；同一 `id` 的新 ZIP 会覆盖旧资源包。
+- `image` 必须位于 `images/`；可选 `bankLogo` 必须位于 `logos/`。
+- 路径使用 `/`，不能使用绝对路径、盘符、空段、`.` 或 `..`。
+- 支持图片后缀：`.png`、`.jpg`、`.jpeg`、`.webp`。
+- 单包最多 5000 个文件/清单项目，`manifest.json` 最大 8 MB，单张图片最大 24 MB，总解压大小最大 512 MB。
 
 ## 下载
 

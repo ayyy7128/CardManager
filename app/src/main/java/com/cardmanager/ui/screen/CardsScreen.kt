@@ -3,8 +3,10 @@ package com.cardmanager.ui.screen
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.net.Uri
 import android.nfc.NfcAdapter
 import android.nfc.tech.IsoDep
 import android.os.Bundle
@@ -34,6 +36,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,14 +64,19 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.cardmanager.R
 import com.cardmanager.data.AssetPlan
+import com.cardmanager.data.BuiltinBank
+import com.cardmanager.data.BuiltinBankCatalog
 import com.cardmanager.data.Card
 import com.cardmanager.data.CardGroup
+import com.cardmanager.data.CardResourceItem
+import com.cardmanager.data.CardResourcePackManager
 import com.cardmanager.data.ImageStore
 import com.cardmanager.data.PiggyEntry
 import com.cardmanager.data.Task
@@ -82,6 +90,7 @@ import com.cardmanager.ui.components.screenPaddingFor
 import com.cardmanager.ui.theme.*
 import com.cardmanager.viewmodel.MainViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DecimalFormat
 
@@ -98,6 +107,48 @@ fun rememberBitmap(path: String, refreshKey: Int, maxDimension: Int = 0): Bitmap
         value = if (path.isEmpty()) null else withContext(Dispatchers.IO) { ImageStore.load(path, maxDimension) }
     }
     return bmp
+}
+
+@Composable
+private fun rememberAssetBitmap(assetPath: String, maxDimension: Int = 0): Bitmap? {
+    val context = LocalContext.current.applicationContext
+    val cached = remember(assetPath, maxDimension) { ImageStore.peekAsset(assetPath, maxDimension) }
+    val bitmap: Bitmap? by produceState<Bitmap?>(cached, assetPath, maxDimension) {
+        value = if (assetPath.isBlank()) null else withContext(Dispatchers.IO) {
+            ImageStore.loadAsset(context, assetPath, maxDimension)
+        }
+    }
+    return bitmap
+}
+
+@Composable
+private fun rememberBankLogo(
+    bank: String,
+    customPath: String,
+    refreshKey: Int,
+    maxDimension: Int
+): Bitmap? {
+    val context = LocalContext.current.applicationContext
+    val assetPath = remember(bank, context) { BuiltinBankCatalog.logoAsset(context, bank) }
+    val cached = remember(bank, customPath, refreshKey, maxDimension, assetPath) {
+        ImageStore.peek(customPath, maxDimension)
+            ?: ImageStore.peekAsset(assetPath, maxDimension)
+    }
+    val bitmap: Bitmap? by produceState<Bitmap?>(
+        cached,
+        bank,
+        customPath,
+        refreshKey,
+        maxDimension,
+        assetPath
+    ) {
+        value = withContext(Dispatchers.IO) {
+            customPath.takeIf { it.isNotBlank() }
+                ?.let { ImageStore.load(it, maxDimension) }
+                ?: ImageStore.loadAsset(context, assetPath, maxDimension)
+        }
+    }
+    return bitmap
 }
 
 @Composable
@@ -420,7 +471,6 @@ fun CardsScreen(vm: MainViewModel) {
                             row.forEach { card ->
                                 CardGalleryItem(card,
                                     onEdit = { focusedCardId = card.id },
-                                    onBankLogoPick = { vm.saveBankLogo(card, it) },
                                     imageVersion = imageVersion,
                                     modifier = Modifier.weight(1f),
                                     columnsInRow = galleryColumnCount)
@@ -515,7 +565,6 @@ fun CardsScreen(vm: MainViewModel) {
                                     row.forEach { card ->
                                         CardGalleryItem(card,
                                             onEdit = { focusedCardId = card.id },
-                                            onBankLogoPick = { vm.saveBankLogo(card, it) },
                                             imageVersion = imageVersion,
                                             modifier = Modifier.weight(1f),
                                             columnsInRow = galleryColumnCount)
@@ -675,7 +724,6 @@ fun CardsScreen(vm: MainViewModel) {
                     is CardOverlay.Add -> CardDialog(
                         groups = groups,
                         selectedGroupId = overlay.groupId,
-                        bankPresets = cards.toBankPresets(),
                         onDismiss = { showAddCard = null },
                         asPage = true
                     ) { d ->
@@ -691,7 +739,6 @@ fun CardsScreen(vm: MainViewModel) {
                         CardDialog(
                             initial = card,
                             groups = groups,
-                            bankPresets = cards.filter { it.id != card.id }.toBankPresets(),
                             onDismiss = { editingCard = null },
                             onDelete = { deletingCard = card; editingCard = null; focusedCardId = null },
                             asPage = true
@@ -850,7 +897,7 @@ private fun WalletCardFace(
         source = sourceCardBmp,
         rotateLandscape = forceLandscapeCrop && card.imageOrientation == "vertical"
     )
-    val bankBmp = rememberBitmap(card.bankLogoPath, imageVersion, 160)
+    val bankBmp = rememberBankLogo(card.bank, card.bankLogoPath, imageVersion, 160)
     val isDimmed = card.status == "cancelled" || card.status == "frozen"
     val statusLabel = when (card.status) {
         "frozen" -> stringResource(R.string.frozen)
@@ -976,7 +1023,7 @@ private fun CardFocusPage(
     val relatedTasks = tasks.filter { it.cardId == card.id }
     val relatedPiggy = piggyEntries.filter { it.cardId == card.id }.sortedByDescending { it.timestamp }
     val relatedPlans = assetPlans.filter { it.cardId == card.id }.sortedBy { it.orderIndex }
-    val bankBmp = rememberBitmap(card.bankLogoPath, imageVersion, 160)
+    val bankBmp = rememberBankLogo(card.bank, card.bankLogoPath, imageVersion, 160)
     val statusLabel = when (card.status) {
         "frozen" -> stringResource(R.string.frozen)
         "pending" -> stringResource(R.string.pending)
@@ -1200,7 +1247,6 @@ private fun FilterPill(label: String, selected: Boolean, bg: Color, textColor: C
 fun CardGalleryItem(
     card: Card,
     onEdit: () -> Unit,
-    onBankLogoPick: (android.net.Uri) -> Unit,
     imageVersion: Int,
     modifier: Modifier = Modifier,
     columnsInRow: Int = 2
@@ -1256,10 +1302,8 @@ fun CardGalleryItem(
     )
     val isDimmed = card.status == "cancelled" || card.status == "frozen"
 
-    val bankLogoPicker  = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> uri?.let { onBankLogoPick(it) } }
-
     val cardBmp = rememberBitmap(card.logoImagePath, imageVersion, 720)
-    val bankBmp = rememberBitmap(card.bankLogoPath, imageVersion, 160)
+    val bankBmp = rememberBankLogo(card.bank, card.bankLogoPath, imageVersion, 160)
 
     // 卡片显示名（卡种名优先）
     val displayName = card.cardTypeName.ifBlank { card.bank }
@@ -1339,7 +1383,7 @@ fun CardGalleryItem(
                         filterQuality = FilterQuality.Medium)
                 } else {
                     Box(Modifier.size(infoLogoSize).clip(RoundedCornerShape(3.dp))
-                        .background(nc.bg).clickable { bankLogoPicker.launch("image/*") },
+                        .background(nc.bg),
                         contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.AccountBalance, null,
                             tint = nc.text, modifier = Modifier.size(if (compact) 8.dp else 9.dp))
@@ -1406,7 +1450,7 @@ fun CardGalleryItem(
                         filterQuality = FilterQuality.Medium)
                 } else {
                     Box(Modifier.size(infoLogoSize).clip(RoundedCornerShape(3.dp))
-                        .background(nc.bg).clickable { bankLogoPicker.launch("image/*") },
+                        .background(nc.bg),
                         contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.AccountBalance, null,
                             tint = nc.text, modifier = Modifier.size(if (compact) 8.dp else 9.dp))
@@ -1521,7 +1565,7 @@ fun CardListItem(
     }
     val isDimmed = card.status == "cancelled" || card.status == "frozen"
     val cardBmp = rememberBitmap(card.logoImagePath, imageVersion, 320)
-    val bankBmp = rememberBitmap(card.bankLogoPath, imageVersion, 120)
+    val bankBmp = rememberBankLogo(card.bank, card.bankLogoPath, imageVersion, 120)
     val displayName = card.cardTypeName.ifBlank { card.bank }
     val isVerticalFace = card.imageOrientation == "vertical"
     val networkDisplayName = when (card.network) {
@@ -1713,18 +1757,363 @@ fun GroupDialog(initial: CardGroup? = null, onDismiss: () -> Unit,
 // ══════════════════════════════════════════════════════════
 // 卡片编辑 Dialog
 // ══════════════════════════════════════════════════════════
-data class BankPreset(val bank: String, val bankLogoPath: String)
+private sealed class BankPickerRow {
+    data class Header(val section: String) : BankPickerRow()
+    data class Entry(val bank: BuiltinBank) : BankPickerRow()
+}
 
-private fun List<Card>.toBankPresets(): List<BankPreset> =
-    this.filter { it.bank.isNotBlank() }
-        .groupBy { it.bank.trim() }
-        .map { (bank, bankCards) ->
-            BankPreset(
-                bank = bank,
-                bankLogoPath = bankCards.firstOrNull { it.bankLogoPath.isNotBlank() }?.bankLogoPath ?: ""
-            )
+private fun openMissingBankIssue(context: Context): Boolean {
+    val issueUrl = Uri.parse("https://github.com/ayyy7128/CardManager/issues/new")
+        .buildUpon()
+        .appendQueryParameter("title", "[银行 Logo] 补充银行：")
+        .appendQueryParameter(
+            "body",
+            "银行名称：\n英文名称：\n国家/地区：\n官方网站：\n官方 Logo 来源：\n其他说明："
+        )
+        .build()
+    return runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, issueUrl))
+        true
+    }.getOrDefault(false)
+}
+
+@Composable
+private fun BankPickerPage(
+    banks: List<BuiltinBank>,
+    selectedBank: String,
+    onBack: () -> Unit,
+    onSelect: (BuiltinBank) -> Unit,
+    onMissing: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val colorScheme = MaterialTheme.colorScheme
+    val filteredBanks = remember(banks, query) {
+        val normalized = query.trim().lowercase()
+        if (normalized.isBlank()) banks else banks.filter { it.searchText.contains(normalized) }
+    }
+    val rows = remember(filteredBanks) {
+        buildList<BankPickerRow> {
+            filteredBanks.groupBy { it.section }.toSortedMap().forEach { (section, sectionBanks) ->
+                add(BankPickerRow.Header(section))
+                sectionBanks.forEach { add(BankPickerRow.Entry(it)) }
+            }
         }
-        .sortedBy { it.bank }
+    }
+    val sectionIndices = remember(rows) {
+        rows.mapIndexedNotNull { index, row ->
+            (row as? BankPickerRow.Header)?.section?.let { it to index }
+        }.toMap()
+    }
+    val alphabetSections = remember(banks) { banks.map { it.section }.distinct().sorted() }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(56.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, stringResource(R.string.close))
+            }
+            Text(
+                stringResource(R.string.select_bank),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onMissing) {
+                Text(stringResource(R.string.bank_not_found))
+            }
+        }
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(stringResource(R.string.search_bank)) },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            trailingIcon = if (query.isNotEmpty()) {
+                {
+                    IconButton(onClick = { query = "" }) {
+                        Icon(Icons.Default.Close, stringResource(R.string.clear_search))
+                    }
+                }
+            } else null,
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp)
+        )
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (rows.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(stringResource(R.string.bank_search_empty), color = colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(end = if (query.isBlank()) 30.dp else 0.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp)
+                ) {
+                    items(rows, key = { row ->
+                        when (row) {
+                            is BankPickerRow.Header -> "header_${row.section}"
+                            is BankPickerRow.Entry -> "bank_${row.bank.name}"
+                        }
+                    }) { row ->
+                        when (row) {
+                            is BankPickerRow.Header -> Text(
+                                row.section,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colorScheme.primary
+                            )
+                            is BankPickerRow.Entry -> {
+                                val logo = rememberAssetBitmap(row.bank.logoAsset, 256)
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSelect(row.bank) }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Box(
+                                        Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (logo != null) {
+                                            Image(
+                                                logo.asImageBitmap(),
+                                                null,
+                                                Modifier.fillMaxSize().padding(2.dp),
+                                                contentScale = ContentScale.Fit,
+                                                filterQuality = FilterQuality.High
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Default.AccountBalance,
+                                                null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                        Text(
+                                            row.bank.name,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (row.bank.english.isNotBlank() && row.bank.english != row.bank.name) {
+                                            Text(
+                                                row.bank.english,
+                                                fontSize = 11.sp,
+                                                color = colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    if (row.bank.name == selectedBank) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            stringResource(R.string.selected),
+                                            tint = colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (query.isBlank()) {
+                    Column(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(30.dp)
+                            .fillMaxHeight()
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        alphabetSections.forEach { section ->
+                            Text(
+                                section,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        sectionIndices[section]?.let { index ->
+                                            scope.launch { listState.scrollToItem(index) }
+                                        }
+                                    }
+                                    .wrapContentHeight(Alignment.CenterVertically),
+                                color = colorScheme.primary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MissingBankDialog(
+    onDismiss: () -> Unit,
+    onCustom: () -> Unit,
+    onFeedback: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.bank_not_found_title)) },
+        text = {
+            Column {
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.custom_bank)) },
+                    supportingContent = { Text(stringResource(R.string.custom_bank_summary)) },
+                    leadingContent = { Icon(Icons.Default.Edit, null) },
+                    trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                    modifier = Modifier.clickable { onCustom() }
+                )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text(stringResource(R.string.feedback_missing_bank)) },
+                    supportingContent = { Text(stringResource(R.string.feedback_missing_bank_summary)) },
+                    leadingContent = { Icon(Icons.Default.Feedback, null) },
+                    trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                    modifier = Modifier.clickable { onFeedback() }
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        }
+    )
+}
+
+@Composable
+private fun CustomBankDialog(
+    initialName: String,
+    initialLogoPath: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    val context = LocalContext.current
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    var logoPath by remember(initialLogoPath) { mutableStateOf(initialLogoPath) }
+    var logoRefreshKey by remember { mutableStateOf(0) }
+    var submitted by remember { mutableStateOf(false) }
+    val logo = rememberBitmap(logoPath, logoRefreshKey, 256)
+
+    fun discardNewLogo() {
+        if (logoPath.isNotBlank() && logoPath != initialLogoPath) {
+            ImageStore.deleteOwned(context, logoPath)
+        }
+    }
+
+    val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            val saved = ImageStore.saveFromUri(context, it, "custom_bank_${System.currentTimeMillis()}")
+            if (saved.isNotBlank()) {
+                discardNewLogo()
+                logoPath = saved
+                logoRefreshKey++
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = {
+            discardNewLogo()
+            onDismiss()
+        },
+        title = { Text(stringResource(R.string.custom_bank)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Box(
+                    Modifier
+                        .size(76.dp)
+                        .align(Alignment.CenterHorizontally)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { logoPicker.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (logo != null) {
+                        Image(
+                            logo.asImageBitmap(),
+                            null,
+                            Modifier.fillMaxSize().padding(4.dp),
+                            contentScale = ContentScale.Fit,
+                            filterQuality = FilterQuality.High
+                        )
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.AddPhotoAlternate, null, modifier = Modifier.size(24.dp))
+                            Text(stringResource(R.string.choose_logo), fontSize = 10.sp)
+                        }
+                    }
+                }
+                if (logoPath.isNotBlank()) {
+                    TextButton(
+                        onClick = {
+                            discardNewLogo()
+                            logoPath = ""
+                            logoRefreshKey++
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    ) {
+                        Text(stringResource(R.string.remove_logo))
+                    }
+                }
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        if (it.isNotBlank()) submitted = false
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.bank_name)) },
+                    singleLine = true,
+                    isError = submitted && name.isBlank(),
+                    supportingText = {
+                        if (submitted && name.isBlank()) Text(stringResource(R.string.required_field))
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                submitted = true
+                if (name.isNotBlank()) onSave(name.trim(), logoPath)
+            }) {
+                Text(stringResource(R.string.save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = {
+                discardNewLogo()
+                onDismiss()
+            }) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
 
 data class CardFormData(
     val bank: String, val network: String, val currency: String,
@@ -1747,7 +2136,7 @@ private enum class NfcFilledField {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), selectedGroupId: String = initial?.groupId ?: "",
-               bankPresets: List<BankPreset> = emptyList(), onDismiss: () -> Unit,
+               onDismiss: () -> Unit,
                onDelete: (() -> Unit)? = null, asPage: Boolean = false, onSave: (CardFormData) -> Unit) {
     var bank         by remember { mutableStateOf(initial?.bank ?: "") }
     var cardTypeName by remember { mutableStateOf(initial?.cardTypeName ?: "") }
@@ -1784,7 +2173,15 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     var nfcStatusText by remember { mutableStateOf("") }
     var pendingNfcResult by remember { mutableStateOf<EmvProbeResult?>(null) }
     var nfcFilledFields by remember { mutableStateOf(emptySet<NfcFilledField>()) }
+    var showResourceLibrary by remember { mutableStateOf(false) }
+    var showBankPicker by remember { mutableStateOf(false) }
+    var showMissingBankMenu by remember { mutableStateOf(false) }
+    var showCustomBankDialog by remember { mutableStateOf(false) }
+    var showFeedbackOpenFailed by remember { mutableStateOf(false) }
+    var applyingResource by remember { mutableStateOf(false) }
+    var resourceApplyError by remember { mutableStateOf("") }
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val nc = networkColor(network)
     val activity = remember(ctx) { ctx.findActivity() }
     val nfcAdapter = remember(ctx) { NfcAdapter.getDefaultAdapter(ctx) }
@@ -1793,6 +2190,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     val nfcUnsupportedText = stringResource(R.string.nfc_unsupported)
     val nfcDisabledText = stringResource(R.string.nfc_disabled)
     val nfcFailedText = stringResource(R.string.nfc_failed)
+    val resourceApplyFailedText = stringResource(R.string.resource_library_apply_failed)
 
     fun stopNfcReader() {
         activity?.let { nfcAdapter?.disableReaderMode(it) }
@@ -1859,17 +2257,9 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
             }
         }
     }
-    val bankPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let {
-            val p = ImageStore.saveFromUri(ctx, it, "bank_${initial?.id ?: System.currentTimeMillis()}")
-            if (p.isNotEmpty()) {
-                bankLogoPath = p
-                bankLogoRefreshKey++
-            }
-        }
-    }
     val cardBmp = rememberBitmap(imagePath, imageRefreshKey, 720)
-    val bankBmp = rememberBitmap(bankLogoPath, bankLogoRefreshKey, 160)
+    val bankBmp = rememberBankLogo(bank, bankLogoPath, bankLogoRefreshKey, 160)
+    val builtinBanks = remember(ctx) { BuiltinBankCatalog.banks(ctx) }
 
     val networkOptions  = listOf(
         "银联" to stringResource(R.string.network_unionpay),
@@ -1896,17 +2286,8 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     val isCreditCard = !noCard && cardCategory == "信用卡"
     val ungroupedLabel = stringResource(R.string.ungrouped_cards)
     val groupOptions = listOf("" to ungroupedLabel) + groups.map { it.id to it.name }
-    val matchedBankPresets = remember(bank, bankLogoPath, bankPresets) {
-        val q = bank.trim()
-        if (q.isBlank()) emptyList()
-        else bankPresets
-            .filter { preset ->
-                preset.bank.contains(q, ignoreCase = true) ||
-                    q.contains(preset.bank, ignoreCase = true)
-            }
-            .filter { it.bank != bank.trim() || (bankLogoPath.isBlank() && it.bankLogoPath.isNotBlank()) }
-            .take(3)
-    }
+    val selectedBuiltinBank = remember(bank, ctx) { BuiltinBankCatalog.find(ctx, bank) }
+    val customBankSelected = bank.isNotBlank() && (bankLogoPath.isNotBlank() || selectedBuiltinBank == null)
 
     @Composable
     fun EditorBody(modifier: Modifier) {
@@ -1971,6 +2352,27 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                     )
                 }
 
+                OutlinedButton(
+                    onClick = {
+                        resourceApplyError = ""
+                        showResourceLibrary = true
+                    },
+                    enabled = !applyingResource,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (applyingResource) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.PhotoLibrary, null, modifier = Modifier.size(17.dp))
+                    }
+                    Spacer(Modifier.width(7.dp))
+                    Text(stringResource(R.string.resource_library_choose))
+                }
+                if (resourceApplyError.isNotBlank()) {
+                    Text(resourceApplyError, fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                }
+
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     val previewModifier = if (imageOrientation == "vertical") {
                         Modifier.width(148.dp).aspectRatio(0.63f)
@@ -2006,69 +2408,74 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(.25f))
 
-                // 银行名 + 银行 logo
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    // 银行 Logo 上传区
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
-                        .background(nc.bg).clickable { bankPicker.launch("image/*") },
-                        contentAlignment = Alignment.Center) {
-                        if (bankBmp != null) Image(bankBmp.asImageBitmap(), null,
-                            Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
-                            contentScale = ContentScale.Fit,
-                            filterQuality = FilterQuality.Medium)
-                        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.AccountBalance, null, tint = nc.text.copy(.5f), modifier = Modifier.size(16.dp))
-                            Text(stringResource(R.string.bank_logo), fontSize = 7.sp, color = nc.text.copy(.4f), lineHeight = 10.sp)
-                        }
-                        if (bankLogoPath.isNotEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomEnd) {
-                            Icon(Icons.Default.Edit, null, tint = Color.White.copy(.7f), modifier = Modifier.size(10.dp).padding(1.dp))
-                        }
-                    }
-                    val bankError = submitted && bank.isBlank()
-                    OutlinedTextField(
-                        value = bank,
-                        onValueChange = {
-                            bank = it
-                            if (it.isNotBlank()) submitted = false
-                        },
-                        label = { Text(stringResource(R.string.bank_name)) },
-                        isError = bankError,
-                        supportingText = {
-                            if (bankError) Text(stringResource(R.string.required_field))
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-                if (matchedBankPresets.isNotEmpty()) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                val bankError = submitted && bank.isBlank()
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(
+                                1.dp,
+                                if (bankError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+                                RoundedCornerShape(12.dp)
+                            )
+                            .clickable { showBankPicker = true }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        matchedBankPresets.forEach { preset ->
-                            val presetLogo = rememberBitmap(preset.bankLogoPath, 0, 120)
-                            AssistChip(
-                                onClick = {
-                                    bank = preset.bank
-                                    if (preset.bankLogoPath.isNotBlank()) {
-                                        bankLogoPath = preset.bankLogoPath
-                                        bankLogoRefreshKey++
-                                    }
-                                    submitted = false
-                                },
-                                label = { Text(stringResource(R.string.fill_bank, preset.bank), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                leadingIcon = {
-                                    if (presetLogo != null) {
-                                        Image(presetLogo.asImageBitmap(), null,
-                                            Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)),
-                                            contentScale = ContentScale.Fit,
-                                            filterQuality = FilterQuality.Medium)
-                                    } else {
-                                        Icon(Icons.Default.AccountBalance, null, modifier = Modifier.size(16.dp))
-                                    }
-                                }
+                        Box(
+                            Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (bankBmp != null) {
+                                Image(
+                                    bankBmp.asImageBitmap(),
+                                    null,
+                                    Modifier.fillMaxSize().padding(2.dp),
+                                    contentScale = ContentScale.Fit,
+                                    filterQuality = FilterQuality.High
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.AccountBalance,
+                                    null,
+                                    tint = nc.text.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                stringResource(R.string.bank_name),
+                                fontSize = 11.sp,
+                                color = if (bankError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                bank.ifBlank { stringResource(R.string.select_bank) },
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (bank.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
+                        if (customBankSelected) {
+                            Text(
+                                stringResource(R.string.custom_bank),
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (bankError) {
+                        Text(
+                            stringResource(R.string.required_field),
+                            modifier = Modifier.padding(start = 12.dp),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.error
+                        )
                     }
                 }
                 OutlinedTextField(value = cardTypeName, onValueChange = { cardTypeName = it },
@@ -2265,15 +2672,89 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
             }
         }
 
+    if (showResourceLibrary) {
+        CardResourcePickerDialog(
+            onDismiss = { showResourceLibrary = false },
+            onSelect = { item ->
+                showResourceLibrary = false
+                applyingResource = true
+                resourceApplyError = ""
+                scope.launch {
+                    val copiedPaths = withContext(Dispatchers.IO) {
+                        val resourceCardId = initial?.id ?: "tmp_${System.currentTimeMillis()}"
+                        val cardImage = CardResourcePackManager.copyItemImage(
+                            context = ctx,
+                            item = item,
+                            cardId = resourceCardId
+                        )
+                        val bankLogo = if (BuiltinBankCatalog.logoAsset(ctx, item.bank).isNotBlank()) {
+                            ""
+                        } else {
+                            CardResourcePackManager.copyItemBankLogo(
+                                context = ctx,
+                                item = item,
+                                cardId = resourceCardId
+                            )
+                        }
+                        cardImage to bankLogo
+                    }
+                    val copiedPath = copiedPaths.first
+                    if (copiedPath.isBlank()) {
+                        resourceApplyError = resourceApplyFailedText
+                    } else {
+                        imagePath = copiedPath
+                        imageRefreshKey++
+                        bankLogoPath = copiedPaths.second
+                        bankLogoRefreshKey++
+                        if (item.bank.isNotBlank()) bank = item.bank
+                        if (item.name.isNotBlank()) cardTypeName = item.name
+                        network = item.network
+                        currency = item.currency
+                        noCard = false
+                        if (item.cardCategory.isNotBlank()) {
+                            cardCategory = item.cardCategory
+                            if (cardCategory != "信用卡") {
+                                creditLimitText = ""
+                                billingDay = 0
+                                repaymentDay = 0
+                            }
+                        }
+                        imageOrientation = item.imageOrientation
+                        submitted = false
+                    }
+                    applyingResource = false
+                }
+            }
+        )
+    }
+
     if (asPage) {
-        BackHandler(onBack = onDismiss)
+        BackHandler(onBack = {
+            if (showBankPicker) showBankPicker = false else onDismiss()
+        })
         Surface(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.statusBars)
         ) {
-            EditorBody(Modifier.fillMaxSize().padding(20.dp))
+            if (showBankPicker) {
+                BankPickerPage(
+                    banks = builtinBanks,
+                    selectedBank = selectedBuiltinBank?.name.orEmpty(),
+                    onBack = { showBankPicker = false },
+                    onSelect = { selected ->
+                        bank = selected.name
+                        bankLogoPath = ""
+                        bankLogoRefreshKey++
+                        submitted = false
+                        showBankPicker = false
+                    },
+                    onMissing = { showMissingBankMenu = true }
+                )
+            } else {
+                EditorBody(Modifier.fillMaxSize().padding(20.dp))
+            }
         }
     } else {
         Dialog(onDismissRequest = onDismiss) {
@@ -2285,6 +2766,49 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                 EditorBody(Modifier.padding(20.dp))
             }
         }
+    }
+
+    if (showMissingBankMenu) {
+        MissingBankDialog(
+            onDismiss = { showMissingBankMenu = false },
+            onCustom = {
+                showMissingBankMenu = false
+                showCustomBankDialog = true
+            },
+            onFeedback = {
+                showMissingBankMenu = false
+                if (!openMissingBankIssue(ctx)) showFeedbackOpenFailed = true
+            }
+        )
+    }
+
+    if (showCustomBankDialog) {
+        CustomBankDialog(
+            initialName = bank.takeIf { customBankSelected }.orEmpty(),
+            initialLogoPath = bankLogoPath.takeIf { customBankSelected }.orEmpty(),
+            onDismiss = { showCustomBankDialog = false },
+            onSave = { customName, customLogoPath ->
+                bank = customName
+                bankLogoPath = customLogoPath
+                bankLogoRefreshKey++
+                submitted = false
+                showCustomBankDialog = false
+                showBankPicker = false
+            }
+        )
+    }
+
+    if (showFeedbackOpenFailed) {
+        AlertDialog(
+            onDismissRequest = { showFeedbackOpenFailed = false },
+            title = { Text(stringResource(R.string.feedback_missing_bank)) },
+            text = { Text(stringResource(R.string.feedback_open_failed)) },
+            confirmButton = {
+                TextButton(onClick = { showFeedbackOpenFailed = false }) {
+                    Text(stringResource(R.string.confirm))
+                }
+            }
+        )
     }
 
     // 月年选择器
@@ -2332,6 +2856,182 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                 pendingNfcResult = null
             }
         )
+    }
+}
+
+@Composable
+private fun CardResourcePickerDialog(
+    onDismiss: () -> Unit,
+    onSelect: (CardResourceItem) -> Unit
+) {
+    val appContext = LocalContext.current.applicationContext
+    var resourceItems by remember { mutableStateOf<List<CardResourceItem>?>(null) }
+    var query by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("") }
+    val cs = MaterialTheme.colorScheme
+
+    LaunchedEffect(Unit) {
+        resourceItems = withContext(Dispatchers.IO) {
+            CardResourcePackManager.loadItems(appContext)
+        }
+    }
+    val filtered = remember(resourceItems, query, category) {
+        val normalizedQuery = query.trim()
+        resourceItems.orEmpty().filter { item ->
+            (category.isBlank() || item.cardCategory == category) &&
+                (normalizedQuery.isBlank() || listOf(
+                    item.bank,
+                    item.bankEnglish,
+                    item.name,
+                    item.network,
+                    item.level,
+                    item.country,
+                    item.source
+                ).any { it.contains(normalizedQuery, ignoreCase = true) })
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        BackHandler(onBack = onDismiss)
+        Surface(
+            color = cs.background,
+            modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)
+        ) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().height(56.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.ArrowBack, stringResource(R.string.close))
+                    }
+                    Text(
+                        stringResource(R.string.resource_library),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (resourceItems != null) {
+                        Text(
+                            stringResource(R.string.resource_library_count, filtered.size),
+                            fontSize = 12.sp,
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.resource_library_search)) },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "" to stringResource(R.string.resource_library_all),
+                        "储蓄卡" to stringResource(R.string.debit_card),
+                        "信用卡" to stringResource(R.string.credit_card)
+                    ).forEach { (value, label) ->
+                        FilterChip(
+                            selected = category == value,
+                            onClick = { category = value },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+
+                when {
+                    resourceItems == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                    resourceItems!!.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.resource_library_empty),
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                    filtered.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            stringResource(R.string.resource_library_no_results),
+                            color = cs.onSurfaceVariant
+                        )
+                    }
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(148.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(filtered, key = { "${it.packId}:${it.id}" }) { item ->
+                            CardResourceTile(item = item, onClick = { onSelect(item) })
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardResourceTile(item: CardResourceItem, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val bitmap = rememberBitmap(item.imagePath, 0, 420)
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(cs.surface)
+            .border(1.dp, cs.outline.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(1.586f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(cs.surfaceVariant.copy(alpha = 0.45f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit,
+                    filterQuality = FilterQuality.Medium
+                )
+            } else {
+                Icon(Icons.Default.CreditCard, null, tint = cs.onSurfaceVariant.copy(alpha = 0.4f))
+            }
+        }
+        Text(
+            item.name.ifBlank { item.bank },
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            item.bank,
+            fontSize = 10.sp,
+            color = cs.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            SmallTag(item.network, cs.primary.copy(alpha = 0.08f), cs.primary)
+            if (item.cardCategory.isNotBlank()) {
+                SmallTag(item.cardCategory, cs.outline.copy(alpha = 0.14f), cs.onSurfaceVariant)
+            }
+        }
     }
 }
 

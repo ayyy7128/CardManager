@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,8 +24,10 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
@@ -45,6 +48,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -65,6 +69,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,12 +87,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cardmanager.R
+import com.cardmanager.data.CardResourcePackInfo
+import com.cardmanager.data.CardResourcePackManager
 import com.cardmanager.data.ImportMode
+import com.cardmanager.data.ReleaseInfo
+import com.cardmanager.data.UpdateCheckError
+import com.cardmanager.data.UpdateCheckResult
+import com.cardmanager.data.UpdateCheckService
 import com.cardmanager.tabs
 import com.cardmanager.ui.components.ScreenPadding
+import com.cardmanager.ui.components.UpdateAvailableDialog
 import com.cardmanager.ui.theme.ColorGold
 import com.cardmanager.ui.theme.ColorRed
 import com.cardmanager.viewmodel.MainViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.DecimalFormat
 import java.time.LocalDate
 
 private const val USDT_TRC20_ADDRESS = "TBzhjqcTLQVkKiyGY3bE94RQnoj6TAFndw"
@@ -105,6 +121,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val visibleOptionalTabs by vm.visibleOptionalTabs.collectAsState()
     val preferHighRefreshRate by vm.preferHighRefreshRate.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var snackMsg by remember { mutableStateOf<String?>(null) }
     val fontImported = stringResource(R.string.font_imported_snackbar)
     val fontImportFailed = stringResource(R.string.font_import_failed)
@@ -117,6 +134,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var importMode by remember { mutableStateOf(ImportMode.MERGE) }
     var importPassword by remember { mutableStateOf("") }
+    var resourcePacks by remember { mutableStateOf<List<CardResourcePackInfo>>(emptyList()) }
+    var resourcePackVersion by remember { mutableStateOf(0) }
+    var importingResourcePack by remember { mutableStateOf(false) }
+    var showResourcePackManager by remember { mutableStateOf(false) }
+    var deletingResourcePack by remember { mutableStateOf<CardResourcePackInfo?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<ReleaseInfo?>(null) }
 
     LaunchedEffect(Unit) { savedFontName = vm.getSetting("custom_font_name", "") }
     LaunchedEffect(snackMsg) { snackMsg?.let { snackbarHostState.showSnackbar(it); snackMsg = null } }
@@ -138,6 +162,35 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
         importMode = ImportMode.MERGE
         importPassword = ""
         showImportDialog = true
+    }
+
+    val resourcePackLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri ?: return@rememberLauncherForActivityResult
+        if (importingResourcePack) return@rememberLauncherForActivityResult
+        importingResourcePack = true
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    CardResourcePackManager.importPack(ctx.applicationContext, uri)
+                }
+                resourcePackVersion++
+                snackMsg = ctx.getString(
+                    R.string.resource_pack_import_success,
+                    result.pack.name,
+                    result.pack.itemCount
+                )
+            } catch (error: Exception) {
+                snackMsg = ctx.getString(R.string.resource_pack_import_failed, error.message ?: "")
+            } finally {
+                importingResourcePack = false
+            }
+        }
+    }
+
+    LaunchedEffect(resourcePackVersion) {
+        resourcePacks = withContext(Dispatchers.IO) {
+            CardResourcePackManager.loadPacks(ctx.applicationContext)
+        }
     }
 
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -249,6 +302,105 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     pendingImportUri = null
                     importPassword = ""
                 }) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+    }
+
+    if (showResourcePackManager) {
+        AlertDialog(
+            onDismissRequest = { showResourcePackManager = false },
+            title = { Text(stringResource(R.string.resource_pack_manage)) },
+            text = {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    resourcePacks.forEach { pack ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(cs.surfaceVariant.copy(alpha = 0.45f))
+                                .padding(start = 12.dp, top = 9.dp, bottom = 9.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(pack.name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    stringResource(
+                                        R.string.resource_pack_detail,
+                                        pack.itemCount,
+                                        formatResourcePackSize(pack.sizeBytes)
+                                    ),
+                                    fontSize = 11.sp,
+                                    color = cs.onSurfaceVariant
+                                )
+                                if (pack.notice.isNotBlank()) {
+                                    Text(
+                                        pack.notice,
+                                        fontSize = 10.sp,
+                                        color = cs.onSurfaceVariant.copy(alpha = 0.72f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            IconButton(onClick = {
+                                showResourcePackManager = false
+                                deletingResourcePack = pack
+                            }) {
+                                Icon(Icons.Default.Close, stringResource(R.string.delete), tint = ColorRed)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    resourcePackLauncher.launch(
+                        arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
+                    )
+                }) {
+                    Text(stringResource(R.string.resource_pack_import))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResourcePackManager = false }) {
+                    Text(stringResource(R.string.close))
+                }
+            }
+        )
+    }
+
+    deletingResourcePack?.let { pack ->
+        AlertDialog(
+            onDismissRequest = {
+                deletingResourcePack = null
+                showResourcePackManager = resourcePacks.isNotEmpty()
+            },
+            title = { Text(stringResource(R.string.resource_pack_delete_title)) },
+            text = { Text(stringResource(R.string.resource_pack_delete_body, pack.name)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val deleted = withContext(Dispatchers.IO) {
+                            CardResourcePackManager.deletePack(ctx.applicationContext, pack.id)
+                        }
+                        deletingResourcePack = null
+                        if (deleted) {
+                            resourcePackVersion++
+                            snackMsg = ctx.getString(R.string.resource_pack_deleted)
+                            showResourcePackManager = resourcePacks.size > 1
+                        }
+                    }
+                }) { Text(stringResource(R.string.delete), color = ColorRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    deletingResourcePack = null
+                    showResourcePackManager = resourcePacks.isNotEmpty()
+                }) {
+                    Text(stringResource(R.string.cancel))
+                }
             }
         )
     }
@@ -389,6 +541,42 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         onClick = { importLauncher.launch("*/*") },
                         trailing = { Icon(Icons.Default.ChevronRight, null, tint = cs.onSurfaceVariant) }
                     )
+                    SettingRow(
+                        icon = Icons.Default.FolderOpen,
+                        title = stringResource(R.string.resource_pack_import),
+                        subtitle = if (importingResourcePack) {
+                            stringResource(R.string.resource_pack_importing)
+                        } else {
+                            stringResource(R.string.resource_pack_import_summary)
+                        },
+                        onClick = {
+                            if (!importingResourcePack) {
+                                resourcePackLauncher.launch(
+                                    arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
+                                )
+                            }
+                        },
+                        trailing = {
+                            if (importingResourcePack) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.ChevronRight, null, tint = cs.onSurfaceVariant)
+                            }
+                        }
+                    )
+                    if (resourcePacks.isNotEmpty()) {
+                        SettingRow(
+                            icon = Icons.Default.CreditCard,
+                            title = stringResource(R.string.resource_pack_manage),
+                            subtitle = stringResource(
+                                R.string.resource_pack_count,
+                                resourcePacks.size,
+                                resourcePacks.sumOf { it.itemCount }
+                            ),
+                            onClick = { showResourcePackManager = true },
+                            trailing = { Icon(Icons.Default.ChevronRight, null, tint = cs.onSurfaceVariant) }
+                        )
+                    }
                 }
             }
 
@@ -399,6 +587,46 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         title = stringResource(R.string.app_name),
                         subtitle = stringResource(R.string.version_1),
                         trailing = {}
+                    )
+                    SettingRow(
+                        icon = Icons.Default.Refresh,
+                        title = stringResource(R.string.check_for_updates),
+                        subtitle = if (checkingUpdate) {
+                            stringResource(R.string.checking_for_updates)
+                        } else {
+                            stringResource(R.string.update_check_summary)
+                        },
+                        onClick = {
+                            if (!checkingUpdate) {
+                                scope.launch {
+                                    checkingUpdate = true
+                                    when (val result = UpdateCheckService.check(ctx, force = true)) {
+                                        is UpdateCheckResult.Available -> availableUpdate = result.release
+                                        is UpdateCheckResult.UpToDate -> snackMsg = ctx.getString(
+                                            R.string.already_latest_version,
+                                            result.currentVersion
+                                        )
+                                        is UpdateCheckResult.Failed -> snackMsg = ctx.getString(
+                                            when (result.reason) {
+                                                UpdateCheckError.RATE_LIMIT -> R.string.update_check_rate_limited
+                                                UpdateCheckError.NO_RELEASE -> R.string.update_check_no_release
+                                                UpdateCheckError.NETWORK,
+                                                UpdateCheckError.INVALID_RESPONSE -> R.string.update_check_failed
+                                            }
+                                        )
+                                        UpdateCheckResult.Skipped -> Unit
+                                    }
+                                    checkingUpdate = false
+                                }
+                            }
+                        },
+                        trailing = {
+                            if (checkingUpdate) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.ChevronRight, null, tint = cs.onSurfaceVariant)
+                            }
+                        }
                     )
                     SettingRow(
                         icon = Icons.Default.Person,
@@ -415,6 +643,22 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 
         SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp))
     }
+
+    availableUpdate?.let { release ->
+        UpdateAvailableDialog(
+            release = release,
+            onDismiss = { availableUpdate = null },
+            onOpenRelease = {
+                UpdateCheckService.openReleasePage(ctx, release.releaseUrl)
+                availableUpdate = null
+            }
+        )
+    }
+}
+
+private fun formatResourcePackSize(bytes: Long): String {
+    val megabytes = bytes.toDouble() / 1024.0 / 1024.0
+    return if (megabytes < 1.0) "<1 MB" else "${DecimalFormat("0.#").format(megabytes)} MB"
 }
 
 @Composable

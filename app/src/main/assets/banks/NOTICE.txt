@@ -1,0 +1,7 @@
+Bank names and logos are provided for identification in CardManager.
+
+Catalog source: https://hi.my-api.cn/face
+Logo source: https://storage.my-api.cn/static/images/logo/
+
+Bank names, logos, and related marks belong to their respective rights holders.
+Their inclusion does not imply endorsement of CardManager by any bank or card issuer.
