@@ -119,6 +119,16 @@
     <string name="close">Close</string>
     <string name="data_overview">Overview</string>
     <string name="data_overview_subtitle">Local statistics for cards, tasks, and vault records</string>
+    <string name="credit_limit_overview">Credit limits</string>
+    <string name="credit_limit_overview_setting">Credit limit overview</string>
+    <string name="credit_limit_base_currency">Converted to %1$s</string>
+    <string name="credit_card_count">Credit cards</string>
+    <string name="total_credit_limit">Total limit</string>
+    <string name="bank_credit_limit_distribution">Limit by bank</string>
+    <string name="card_credit_limit_distribution">Limit by card</string>
+    <string name="credit_limit_display_by_card">Group by card</string>
+    <string name="credit_limit_display_by_bank">Group by bank</string>
+    <string name="no_credit_limit_data">No credit limits have been entered</string>
     <string name="total_cards">Total cards</string>
     <string name="group_count">Groups</string>
     <string name="active_cards">Active cards</string>
@@ -301,7 +311,7 @@
     <string name="update_check_failed">Could not check for updates. Try again later.</string>
     <string name="update_check_rate_limited">GitHub request limit reached. Try again later.</string>
     <string name="update_check_no_release">No release is available yet.</string>
-    <string name="version_1">Version 2.5.0</string>
+    <string name="version_1">Version 2.6.0</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">Personal data stays on this device and is never uploaded. Network access is only used for rates, trading days, and update checks.</string>
     <string name="support_development">Support development</string>

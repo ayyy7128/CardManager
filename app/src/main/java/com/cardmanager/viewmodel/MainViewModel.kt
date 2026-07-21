@@ -82,6 +82,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val dataChartOrder: StateFlow<List<String>> = _dataChartOrder
     private val _visibleDataOverview = MutableStateFlow(sanitizeDataOverview(prefs.getString("visibleDataOverview", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
     val visibleDataOverview: StateFlow<Set<String>> = _visibleDataOverview
+    private val _showCreditLimitOverview = MutableStateFlow(
+        prefs.getString("showCreditLimitOverview", "true").toBoolean()
+    )
+    val showCreditLimitOverview: StateFlow<Boolean> = _showCreditLimitOverview
+    private val _creditLimitGroupMode = MutableStateFlow(
+        sanitizeCreditLimitGroupMode(prefs.getString("creditLimitGroupMode", "card") ?: "card")
+    )
+    val creditLimitGroupMode: StateFlow<String> = _creditLimitGroupMode
     private val _dataOverviewOrder = MutableStateFlow(sanitizeDataOverviewOrder(prefs.getString("dataOverviewOrder", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
     val dataOverviewOrder: StateFlow<List<String>> = _dataOverviewOrder
 
@@ -131,6 +139,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val visibleDataCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", prefs.getString("visibleDataCharts", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
             val dataChartOrder = sanitizeDataChartOrder(repo.getSetting("dataChartOrder", prefs.getString("dataChartOrder", defaultDataChartIds.joinToString(",")) ?: defaultDataChartIds.joinToString(",")))
             val visibleDataOverview = sanitizeDataOverview(repo.getSetting("visibleDataOverview", prefs.getString("visibleDataOverview", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
+            val showCreditLimitOverview = repo.getSetting(
+                "showCreditLimitOverview",
+                prefs.getString("showCreditLimitOverview", "true") ?: "true"
+            ).toBoolean()
+            val creditLimitGroupMode = sanitizeCreditLimitGroupMode(
+                repo.getSetting(
+                    "creditLimitGroupMode",
+                    prefs.getString("creditLimitGroupMode", "card") ?: "card"
+                )
+            )
             val dataOverviewOrder = sanitizeDataOverviewOrder(repo.getSetting("dataOverviewOrder", prefs.getString("dataOverviewOrder", defaultDataOverviewIds.joinToString(",")) ?: defaultDataOverviewIds.joinToString(",")))
             val preferHighRefreshRate = repo.getSetting("preferHighRefreshRate", prefs.getString("preferHighRefreshRate", "false") ?: "false").toBoolean()
             val vaultCurrency = ExchangeRateService.sanitizeCurrency(repo.getSetting("vaultCurrency", prefs.getString("vaultCurrency", "CNY") ?: "CNY"))
@@ -146,6 +164,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .putString("visibleDataCharts", visibleDataCharts.joinToString(","))
                 .putString("dataChartOrder", dataChartOrder.joinToString(","))
                 .putString("visibleDataOverview", visibleDataOverview.joinToString(","))
+                .putString("showCreditLimitOverview", showCreditLimitOverview.toString())
+                .putString("creditLimitGroupMode", creditLimitGroupMode)
                 .putString("dataOverviewOrder", dataOverviewOrder.joinToString(","))
                 .putString("vaultCurrency", vaultCurrency)
                 .putString("preferHighRefreshRate", preferHighRefreshRate.toString())
@@ -162,6 +182,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _visibleDataCharts.value = visibleDataCharts
             _dataChartOrder.value = dataChartOrder
             _visibleDataOverview.value = visibleDataOverview
+            _showCreditLimitOverview.value = showCreditLimitOverview
+            _creditLimitGroupMode.value = creditLimitGroupMode
             _dataOverviewOrder.value = dataOverviewOrder
             _vaultCurrency.value = vaultCurrency
             _preferHighRefreshRate.value = preferHighRefreshRate
@@ -469,6 +491,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun sanitizeCreditLimitGroupMode(raw: String): String =
+        if (raw == "bank") "bank" else "card"
+
+    fun setCreditLimitOverviewVisible(visible: Boolean) {
+        viewModelScope.launch {
+            _showCreditLimitOverview.value = visible
+            prefs.edit().putString("showCreditLimitOverview", visible.toString()).apply()
+            repo.setSetting("showCreditLimitOverview", visible.toString())
+        }
+    }
+
+    fun setCreditLimitGroupMode(mode: String) {
+        viewModelScope.launch {
+            val safeMode = sanitizeCreditLimitGroupMode(mode)
+            _creditLimitGroupMode.value = safeMode
+            prefs.edit().putString("creditLimitGroupMode", safeMode).apply()
+            repo.setSetting("creditLimitGroupMode", safeMode)
+        }
+    }
+
     fun moveDataOverview(itemId: String, delta: Int) {
         moveDataItem(itemId, delta, defaultDataOverviewIds, _dataOverviewOrder, "dataOverviewOrder")
     }
@@ -550,6 +592,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 repaymentDay.takeIf { it in 1..31 } ?: 0))
         }
     }
+
     fun updateCard(c: Card) {
         viewModelScope.launch {
             repo.updateCard(c)
@@ -951,6 +994,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val visibleCharts = sanitizeDataCharts(repo.getSetting("visibleDataCharts", _visibleDataCharts.value.joinToString(",")))
         val chartOrder = sanitizeDataChartOrder(repo.getSetting("dataChartOrder", _dataChartOrder.value.joinToString(",")))
         val visibleOverview = sanitizeDataOverview(repo.getSetting("visibleDataOverview", _visibleDataOverview.value.joinToString(",")))
+        val showCreditLimitOverview = repo.getSetting(
+            "showCreditLimitOverview",
+            _showCreditLimitOverview.value.toString()
+        ).toBoolean()
+        val creditLimitGroupMode = sanitizeCreditLimitGroupMode(
+            repo.getSetting("creditLimitGroupMode", _creditLimitGroupMode.value)
+        )
         val overviewOrder = sanitizeDataOverviewOrder(repo.getSetting("dataOverviewOrder", _dataOverviewOrder.value.joinToString(",")))
         val piggyTaskRaw = repo.getSetting("piggyTask", _piggyTaskId.value)
         val legacyPiggySyncFromStart = repo.getSetting("piggySyncFromStart", _piggySyncFromStart.value.toString()).toBoolean()
@@ -977,6 +1027,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _visibleDataCharts.value = visibleCharts
         _dataChartOrder.value = chartOrder
         _visibleDataOverview.value = visibleOverview
+        _showCreditLimitOverview.value = showCreditLimitOverview
+        _creditLimitGroupMode.value = creditLimitGroupMode
         _dataOverviewOrder.value = overviewOrder
         _vaultCurrency.value = vaultCurrency
         _preferHighRefreshRate.value = preferHighRefreshRate
@@ -998,6 +1050,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .putString("visibleDataCharts", visibleCharts.joinToString(","))
             .putString("dataChartOrder", chartOrder.joinToString(","))
             .putString("visibleDataOverview", visibleOverview.joinToString(","))
+            .putString("showCreditLimitOverview", showCreditLimitOverview.toString())
+            .putString("creditLimitGroupMode", creditLimitGroupMode)
             .putString("dataOverviewOrder", overviewOrder.joinToString(","))
             .putString("vaultCurrency", vaultCurrency)
             .putString("preferHighRefreshRate", preferHighRefreshRate.toString())

@@ -119,6 +119,16 @@
     <string name="close">关闭</string>
     <string name="data_overview">数据总览</string>
     <string name="data_overview_subtitle">卡片、任务和小金库记录的本地统计</string>
+    <string name="credit_limit_overview">信用卡额度</string>
+    <string name="credit_limit_overview_setting">信用卡总额度</string>
+    <string name="credit_limit_base_currency">按 %1$s 折算</string>
+    <string name="credit_card_count">信用卡数量</string>
+    <string name="total_credit_limit">总额度</string>
+    <string name="bank_credit_limit_distribution">银行额度分布</string>
+    <string name="card_credit_limit_distribution">卡片额度分布</string>
+    <string name="credit_limit_display_by_card">按卡号显示</string>
+    <string name="credit_limit_display_by_bank">按银行显示</string>
+    <string name="no_credit_limit_data">暂无已填写的信用卡额度</string>
     <string name="total_cards">卡片总数</string>
     <string name="group_count">分组数</string>
     <string name="active_cards">正常卡片</string>
@@ -301,7 +311,7 @@
     <string name="update_check_failed">检查更新失败，请稍后重试</string>
     <string name="update_check_rate_limited">GitHub 请求过于频繁，请稍后重试</string>
     <string name="update_check_no_release">尚未发布可用版本</string>
-    <string name="version_1">&#x7248;&#x672C; 2.5.0</string>
+    <string name="version_1">&#x7248;&#x672C; 2.6.0</string>
     <string name="authors">ayyy  ×  Claude  ×  Codex</string>
     <string name="privacy_local_only">个人数据仅存本机，不会上传；联网仅用于汇率、交易日和更新检查</string>
     <string name="support_development">&#x652F;&#x6301;&#x5F00;&#x53D1;</string>

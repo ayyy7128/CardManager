@@ -36,9 +36,11 @@ import androidx.compose.material.icons.filled.Task
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,9 +58,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cardmanager.R
+import com.cardmanager.data.AssetCalculator
 import com.cardmanager.ui.components.AppPanel
 import com.cardmanager.ui.components.MetricTile
 import com.cardmanager.ui.components.SectionHeader
@@ -74,6 +78,9 @@ import java.text.DecimalFormat
 
 private data class ChartItem(val label: String, val count: Int, val color: Color)
 private data class ChartSpec(val id: String, val title: String, val total: Int, val items: List<ChartItem>)
+private const val CREDIT_LIMIT_OVERVIEW_ID = "creditLimitOverview"
+
+private data class CreditLimitBankItem(val bank: String, val tail: String, val amount: Double)
 private data class MetricSpec(
     val id: String,
     val title: String,
@@ -82,7 +89,14 @@ private data class MetricSpec(
     val color: Color,
     val onClick: (() -> Unit)? = null
 )
-private data class DataOptionSpec(val id: String, val title: String)
+private data class DataOptionSpec(
+    val id: String,
+    val title: String,
+    val reorderable: Boolean = true,
+    val modeLabel: String? = null,
+    val modeChecked: Boolean? = null,
+    val onModeChange: ((Boolean) -> Unit)? = null
+)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -92,9 +106,13 @@ fun DataScreen(vm: MainViewModel) {
     val tasks by vm.tasks.collectAsState()
     val piggyEntries by vm.piggyEntries.collectAsState()
     val total by vm.piggyTotal.collectAsState()
+    val vaultCurrency by vm.vaultCurrency.collectAsState()
+    val exchangeRates by vm.exchangeRates.collectAsState()
     val visibleCharts by vm.visibleDataCharts.collectAsState()
     val chartOrder by vm.dataChartOrder.collectAsState()
     val visibleOverview by vm.visibleDataOverview.collectAsState()
+    val showCreditLimitOverview by vm.showCreditLimitOverview.collectAsState()
+    val creditLimitGroupMode by vm.creditLimitGroupMode.collectAsState()
     val overviewOrder by vm.dataOverviewOrder.collectAsState()
     val cs = MaterialTheme.colorScheme
     val df = remember { DecimalFormat("#,##0.00") }
@@ -158,6 +176,59 @@ fun DataScreen(vm: MainViewModel) {
     }
 
     val groupNameById = remember(groups) { groups.associate { it.id to it.name } }
+    val creditCards = remember(cards) {
+        cards.filter { card ->
+            !card.noCard &&
+                card.status != "cancelled" &&
+                (card.cardCategory == "信用卡" || card.cardCategory.equals("credit", ignoreCase = true))
+        }
+    }
+    val creditLimitBankItems = remember(
+        creditCards,
+        vaultCurrency,
+        exchangeRates,
+        notSetLabel,
+        creditLimitGroupMode
+    ) {
+        val perCardItems = creditCards
+            .asSequence()
+            .filter { it.creditLimit.isFinite() && it.creditLimit > 0.0 }
+            .map { card ->
+                CreditLimitBankItem(
+                    bank = card.bank.ifBlank { notSetLabel },
+                    tail = card.tail.trim(),
+                    amount = vm.convertMoney(card.creditLimit, card.currency, vaultCurrency)
+                )
+            }
+            .filter { it.amount.isFinite() && it.amount > 0.0 }
+            .toList()
+        val groupedItems = if (creditLimitGroupMode == "bank") {
+            perCardItems
+                .groupBy { it.bank }
+                .map { (bank, items) ->
+                    CreditLimitBankItem(
+                        bank = bank,
+                        tail = "",
+                        amount = items.sumOf { it.amount }
+                    )
+                }
+        } else {
+            perCardItems
+        }
+        groupedItems
+            .sortedByDescending { it.amount }
+            .let { rows ->
+                if (rows.size <= 6) rows
+                else rows.take(5) + CreditLimitBankItem(
+                    bank = otherLabel,
+                    tail = "",
+                    amount = rows.drop(5).sumOf { it.amount }
+                )
+            }
+    }
+    val totalCreditLimit = remember(creditLimitBankItems) {
+        creditLimitBankItems.sumOf { it.amount }
+    }
     val metricSpecs = listOf(
         MetricSpec("totalCards", stringResource(R.string.total_cards), "${cards.size}", Icons.Default.CreditCard, cs.primary),
         MetricSpec("groupCount", stringResource(R.string.group_count), "${groups.size}", Icons.Default.FolderOpen, Color(0xFF7C3AED)),
@@ -255,10 +326,25 @@ fun DataScreen(vm: MainViewModel) {
         }
 
         LazyColumn(contentPadding = pagePadding, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            if (showCreditLimitOverview) {
+                item {
+                    CreditLimitOverviewPanel(
+                        cardCount = creditCards.size,
+                        totalLimit = totalCreditLimit,
+                        currency = vaultCurrency,
+                        groupMode = creditLimitGroupMode,
+                        bankItems = creditLimitBankItems
+                    )
+                }
+            }
+
             item {
                 SectionHeader(
                     stringResource(R.string.data_overview),
-                    subtitle = stringResource(R.string.count_items, selectedMetricSpecs.size),
+                    subtitle = stringResource(
+                        R.string.count_items,
+                        selectedMetricSpecs.size + if (showCreditLimitOverview) 1 else 0
+                    ),
                     trailing = {
                         IconButton(onClick = { showOverviewSettings = true }) {
                             Icon(Icons.Default.Settings, stringResource(R.string.data_overview_settings), tint = cs.onSurfaceVariant)
@@ -323,12 +409,34 @@ fun DataScreen(vm: MainViewModel) {
     }
 
     if (showOverviewSettings) {
+        val creditLimitOption = DataOptionSpec(
+            id = CREDIT_LIMIT_OVERVIEW_ID,
+            title = stringResource(R.string.credit_limit_overview_setting),
+            reorderable = false,
+            modeLabel = stringResource(
+                if (creditLimitGroupMode == "bank") R.string.credit_limit_display_by_bank
+                else R.string.credit_limit_display_by_card
+            ),
+            modeChecked = creditLimitGroupMode == "bank",
+            onModeChange = { groupByBank ->
+                vm.setCreditLimitGroupMode(if (groupByBank) "bank" else "card")
+            }
+        )
         DataVisibilityDialog(
             title = stringResource(R.string.data_overview_settings),
-            options = orderedMetricSpecs.map { DataOptionSpec(it.id, it.title) },
-            visibleIds = visibleOverview,
-            onVisibleChange = vm::setDataOverviewVisible,
-            onMove = vm::moveDataOverview,
+            options = listOf(creditLimitOption) + orderedMetricSpecs.map { DataOptionSpec(it.id, it.title) },
+            visibleIds = visibleOverview + if (showCreditLimitOverview) {
+                setOf(CREDIT_LIMIT_OVERVIEW_ID)
+            } else {
+                emptySet()
+            },
+            onVisibleChange = { id, visible ->
+                if (id == CREDIT_LIMIT_OVERVIEW_ID) vm.setCreditLimitOverviewVisible(visible)
+                else vm.setDataOverviewVisible(id, visible)
+            },
+            onMove = { id, delta ->
+                if (id != CREDIT_LIMIT_OVERVIEW_ID) vm.moveDataOverview(id, delta)
+            },
             onDismiss = { showOverviewSettings = false }
         )
     }
@@ -395,6 +503,150 @@ fun DataScreen(vm: MainViewModel) {
 }
 
 @Composable
+private fun CreditLimitOverviewPanel(
+    cardCount: Int,
+    totalLimit: Double,
+    currency: String,
+    groupMode: String,
+    bankItems: List<CreditLimitBankItem>
+) {
+    val cs = MaterialTheme.colorScheme
+    val formattedTotal = remember(totalLimit, currency) {
+        AssetCalculator.formatMoney(totalLimit, currency)
+    }
+    val totalFontSize = when {
+        formattedTotal.length <= 10 -> 22.sp
+        formattedTotal.length <= 15 -> 19.sp
+        else -> 16.sp
+    }
+
+    AppPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            SectionHeader(
+                title = stringResource(R.string.credit_limit_overview),
+                subtitle = stringResource(R.string.credit_limit_base_currency, currency)
+            )
+            HorizontalDivider(color = cs.outline.copy(alpha = 0.18f))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CreditLimitSummary(
+                    label = stringResource(R.string.credit_card_count),
+                    value = cardCount.toString(),
+                    valueColor = cs.primary,
+                    modifier = Modifier.weight(0.8f)
+                )
+                CreditLimitSummary(
+                    label = stringResource(R.string.total_credit_limit),
+                    value = formattedTotal,
+                    valueColor = cs.primary,
+                    valueFontSize = totalFontSize,
+                    modifier = Modifier.weight(1.2f)
+                )
+            }
+            HorizontalDivider(color = cs.outline.copy(alpha = 0.18f))
+            Text(
+                stringResource(
+                    if (groupMode == "bank") R.string.bank_credit_limit_distribution
+                    else R.string.card_credit_limit_distribution
+                ),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface
+            )
+            if (bankItems.isEmpty()) {
+                Text(
+                    stringResource(R.string.no_credit_limit_data),
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant
+                )
+            } else {
+                val maxAmount = bankItems.maxOf { it.amount }.coerceAtLeast(1.0)
+                Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                    bankItems.forEach { item ->
+                        val amountText = remember(item.amount, currency) {
+                            AssetCalculator.formatMoney(item.amount, currency)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    if (item.tail.isBlank()) item.bank else "${item.bank} · ••${item.tail}",
+                                    fontSize = 12.sp,
+                                    color = cs.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    amountText,
+                                    fontSize = if (amountText.length <= 15) 12.sp else 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = cs.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(cs.surfaceVariant)
+                            ) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth((item.amount / maxAmount).toFloat().coerceIn(0.02f, 1f))
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(cs.primary.copy(alpha = 0.82f))
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CreditLimitSummary(
+    label: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier,
+    valueFontSize: TextUnit = 22.sp
+) {
+    Column(
+        modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            value,
+            fontSize = valueFontSize,
+            fontWeight = FontWeight.Bold,
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun DataVisibilityDialog(
     title: String,
     options: List<DataOptionSpec>,
@@ -418,32 +670,58 @@ private fun DataVisibilityDialog(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onVisibleChange(option.id, option.id !in visibleIds) }
-                                .pointerInput(option.id, options) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = { dragOffset = 0f },
-                                        onDragCancel = { dragOffset = 0f },
-                                        onDragEnd = { dragOffset = 0f },
-                                        onDrag = { _, dragAmount ->
-                                            dragOffset += dragAmount.y
-                                            if (dragOffset > 46f) {
-                                                onMove(option.id, 1)
-                                                dragOffset = 0f
-                                            } else if (dragOffset < -46f) {
-                                                onMove(option.id, -1)
-                                                dragOffset = 0f
-                                            }
+                                .then(
+                                    if (option.reorderable) {
+                                        Modifier.pointerInput(option.id, options) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = { dragOffset = 0f },
+                                                onDragCancel = { dragOffset = 0f },
+                                                onDragEnd = { dragOffset = 0f },
+                                                onDrag = { _, dragAmount ->
+                                                    dragOffset += dragAmount.y
+                                                    if (dragOffset > 46f) {
+                                                        onMove(option.id, 1)
+                                                        dragOffset = 0f
+                                                    } else if (dragOffset < -46f) {
+                                                        onMove(option.id, -1)
+                                                        dragOffset = 0f
+                                                    }
+                                                }
+                                            )
                                         }
-                                    )
-                                }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                                 .padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.DragIndicator, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                            if (option.reorderable) {
+                                Icon(Icons.Default.DragIndicator, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                            } else {
+                                Spacer(Modifier.size(22.dp))
+                            }
                             Checkbox(
                                 checked = option.id in visibleIds,
                                 onCheckedChange = { onVisibleChange(option.id, it) }
                             )
-                            Text(option.title, fontSize = 14.sp, color = cs.onSurface, modifier = Modifier.weight(1f))
+                            Column(Modifier.weight(1f)) {
+                                Text(option.title, fontSize = 14.sp, color = cs.onSurface)
+                                option.modeLabel?.let { modeLabel ->
+                                    Text(
+                                        modeLabel,
+                                        fontSize = 11.sp,
+                                        color = cs.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            option.modeChecked?.let { checked ->
+                                Switch(
+                                    checked = checked,
+                                    onCheckedChange = option.onModeChange
+                                )
+                            }
                         }
                     }
                 }

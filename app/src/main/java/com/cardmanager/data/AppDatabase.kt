@@ -257,6 +257,8 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         "visibleDataCharts",
         "dataChartOrder",
         "visibleDataOverview",
+        "showCreditLimitOverview",
+        "creditLimitGroupMode",
         "dataOverviewOrder",
         "custom_font_name"
     )
@@ -880,6 +882,14 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 )
             }
         }
+        settingsByKey.putIfAbsent(
+            "showCreditLimitOverview",
+            AppSetting("showCreditLimitOverview", "true")
+        )
+        settingsByKey.putIfAbsent(
+            "creditLimitGroupMode",
+            AppSetting("creditLimitGroupMode", "card")
+        )
         if (hasImportedFontFile && restoredFontName != null) {
             settingsByKey["custom_font_path"] = AppSetting("custom_font_path", importedFontFile.absolutePath)
             settingsByKey["custom_font_name"] = AppSetting("custom_font_name", restoredFontName)
