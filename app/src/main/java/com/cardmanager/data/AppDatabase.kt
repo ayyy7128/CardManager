@@ -11,7 +11,7 @@ import java.io.File
 
 @Database(
     entities = [CardGroup::class, Card::class, Task::class, PiggyEntry::class, AssetPlan::class, AppSetting::class],
-    version = 12,
+    version = 13,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -156,6 +156,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val M_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                if (!db.hasColumn("cards", "sharedCreditLimitGroupId")) {
+                    db.execSQL("ALTER TABLE cards ADD COLUMN sharedCreditLimitGroupId TEXT NOT NULL DEFAULT ''")
+                }
+                if (!db.hasColumn("cards", "sharedCreditLimitCurrency")) {
+                    db.execSQL("ALTER TABLE cards ADD COLUMN sharedCreditLimitCurrency TEXT NOT NULL DEFAULT ''")
+                }
+                if (!db.hasColumn("cards", "creditLimitsJson")) {
+                    db.execSQL("ALTER TABLE cards ADD COLUMN creditLimitsJson TEXT NOT NULL DEFAULT ''")
+                }
+            }
+        }
+
         // v6: 添加有效期字段
         private val M_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -222,7 +236,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "cardmanager.db")
-                .addMigrations(M_1_2, M_2_3, M_3_4, M_4_5, M_5_6, M_6_7, M_7_8, M_8_9, M_9_10, M_10_11, M_11_12)
+                .addMigrations(M_1_2, M_2_3, M_3_4, M_4_5, M_5_6, M_6_7, M_7_8, M_8_9, M_9_10, M_10_11, M_11_12, M_12_13)
                 .build().also { INSTANCE = it }
         }
     }
@@ -281,20 +295,114 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 db.cardDao().delete(card)
             }
             db.groupDao().delete(g)
+            normalizeSharedCreditLimitGroups()
         }
         groupCards.forEach { deleteImagesIfOwned(it) }
     }
 
     suspend fun saveCard(c: Card) = db.cardDao().insert(c)
     suspend fun updateCard(c: Card) = db.cardDao().update(c)
+
+    suspend fun saveCardWithSharedLimit(c: Card, selectedCardIds: Set<String>) {
+        db.withTransaction {
+            val existingCards = db.cardDao().getAllCardsOnce()
+            val previousCard = existingCards.firstOrNull { it.id == c.id }
+            val previousGroupId = previousCard?.sharedCreditLimitGroupId.orEmpty()
+            val validSelectedIds = existingCards.asSequence()
+                .filter { it.id in selectedCardIds }
+                .filter { it.id != c.id }
+                .filter { it.bank.trim() == c.bank.trim() }
+                .filter { !it.noCard && isCreditCard(it.cardCategory) }
+                .map { it.id }
+                .toSet()
+            val selectedPreviousMember = previousGroupId.isNotBlank() && existingCards.any {
+                it.id in validSelectedIds && it.sharedCreditLimitGroupId == previousGroupId
+            }
+            val sharedGroupId = if (!c.noCard && isCreditCard(c.cardCategory) && validSelectedIds.isNotEmpty()) {
+                if (selectedPreviousMember) previousGroupId
+                else "credit_limit_${java.util.UUID.randomUUID()}"
+            } else {
+                ""
+            }
+            val sharedCurrency = if (sharedGroupId.isBlank()) {
+                ""
+            } else if (selectedPreviousMember) {
+                previousCard?.sharedCreditLimitCurrency.orEmpty().ifBlank { previousCard?.currency ?: c.currency }
+            } else {
+                c.currency
+            }
+
+            val nextById = existingCards.associateBy { it.id }.toMutableMap()
+            if (previousGroupId.isNotBlank() && sharedGroupId == previousGroupId) {
+                nextById.keys.toList().forEach { id ->
+                    val card = nextById.getValue(id)
+                    if (card.sharedCreditLimitGroupId == previousGroupId &&
+                        card.id != c.id && card.id !in validSelectedIds
+                    ) nextById[id] = card.copy(
+                        sharedCreditLimitGroupId = "",
+                        sharedCreditLimitCurrency = ""
+                    )
+                }
+            }
+            validSelectedIds.forEach { id ->
+                nextById[id]?.let { selected ->
+                    nextById[id] = selected.copy(
+                        creditLimit = c.creditLimit.coerceAtLeast(0.0),
+                        creditLimitsJson = c.creditLimitsJson,
+                        sharedCreditLimitGroupId = sharedGroupId,
+                        sharedCreditLimitCurrency = sharedCurrency
+                    )
+                }
+            }
+            nextById[c.id] = c.copy(
+                sharedCreditLimitGroupId = sharedGroupId,
+                sharedCreditLimitCurrency = sharedCurrency
+            )
+
+            val memberCounts = nextById.values
+                .filter { it.sharedCreditLimitGroupId.isNotBlank() }
+                .groupingBy { it.sharedCreditLimitGroupId }
+                .eachCount()
+            nextById.keys.toList().forEach { id ->
+                val card = nextById.getValue(id)
+                if (card.sharedCreditLimitGroupId.isNotBlank() &&
+                    memberCounts[card.sharedCreditLimitGroupId] == 1
+                ) nextById[id] = card.copy(
+                    sharedCreditLimitGroupId = "",
+                    sharedCreditLimitCurrency = ""
+                )
+            }
+            nextById.values.forEach { db.cardDao().insert(it) }
+        }
+    }
+
+    private fun isCreditCard(category: String): Boolean =
+        category == "信用卡" || category.equals("credit", ignoreCase = true)
     suspend fun deleteCard(c: Card) {
         db.withTransaction {
             db.taskDao().deleteForCard(c.id)
             db.piggyDao().deleteForCard(c.id)
             db.assetPlanDao().unlinkCard(c.id)
             db.cardDao().delete(c)
+            normalizeSharedCreditLimitGroups()
         }
         deleteImagesIfOwned(c)
+    }
+
+    private suspend fun normalizeSharedCreditLimitGroups() {
+        val cards = db.cardDao().getAllCardsOnce()
+        val counts = cards.asSequence()
+            .filter { it.sharedCreditLimitGroupId.isNotBlank() }
+            .groupingBy { it.sharedCreditLimitGroupId }
+            .eachCount()
+        cards.filter {
+            it.sharedCreditLimitGroupId.isNotBlank() && counts[it.sharedCreditLimitGroupId] == 1
+        }.forEach {
+            db.cardDao().insert(it.copy(
+                sharedCreditLimitGroupId = "",
+                sharedCreditLimitCurrency = ""
+            ))
+        }
     }
     suspend fun updateCardOrder(id: String, order: Int) = db.cardDao().updateSortOrder(id, order)
 
@@ -528,7 +636,10 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
             "\"order\":${c.sortOrder},\"cardTypeName\":\"${esc(c.cardTypeName)}\"," +
             "\"logoFile\":\"${esc(lf)}\",\"bankLogoFile\":\"${esc(bf)}\",\"expiryDate\":\"${esc(c.expiryDate)}\"," +
             "\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\"," +
-            "\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay}}"
+            "\"creditLimit\":${c.creditLimit},\"creditLimitsJson\":\"${esc(c.creditLimitsJson)}\"," +
+            "\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay}," +
+            "\"sharedCreditLimitGroupId\":\"${esc(c.sharedCreditLimitGroupId)}\"," +
+            "\"sharedCreditLimitCurrency\":\"${esc(c.sharedCreditLimitCurrency)}\"}"
         }}]")
         fun tj(t: Task) = "{\"id\":\"${t.id}\",\"name\":\"${esc(t.name)}\",\"freq\":\"${t.freq}\"," +
             "\"cardId\":\"${t.cardId}\",\"isInvest\":${t.isInvest},\"investAmount\":${t.investAmount}," +
@@ -762,12 +873,20 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         for (i in 0 until cardsArray.length()) {
             val item = cardsArray.getJSONObject(i)
             val creditLimit = requireFinite(item.optDouble("creditLimit", 0.0), "信用卡额度")
+            val cardCurrency = item.optString("currency", "CNY")
+            val sharedCreditLimitGroupId = item.optString("sharedCreditLimitGroupId", "").trim()
+            val creditLimitsJson = item.optString("creditLimitsJson", "")
+            try {
+                CardCreditLimitTools.requireValid(creditLimitsJson)
+            } catch (error: Exception) {
+                throw Exception("备份文件中的多币种信用卡额度无效", error)
+            }
             parsedCards += Card(
                 id = item.getString("id"),
                 groupId = item.getString("gid"),
                 bank = item.getString("bank"),
                 network = item.optString("network", "银联"),
-                currency = item.optString("currency", "CNY"),
+                currency = cardCurrency,
                 tail = item.optString("tail", ""),
                 role = item.optString("role", ""),
                 note = item.optString("note", ""),
@@ -783,10 +902,46 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
                 sortOrder = item.optInt("order", i),
                 imageOrientation = normalizedOrientation(item.optString("imageOrientation", "horizontal")),
                 creditLimit = creditLimit.coerceAtLeast(0.0),
+                creditLimitsJson = creditLimitsJson,
                 billingDay = item.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0,
-                repaymentDay = item.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0
+                repaymentDay = item.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0,
+                sharedCreditLimitGroupId = sharedCreditLimitGroupId,
+                sharedCreditLimitCurrency = if (sharedCreditLimitGroupId.isBlank()) "" else item.optString(
+                    "sharedCreditLimitCurrency",
+                    cardCurrency
+                ).trim()
             )
         }
+        parsedCards.asSequence()
+            .filter { it.sharedCreditLimitGroupId.isNotBlank() }
+            .groupBy { it.sharedCreditLimitGroupId }
+            .forEach { (_, members) ->
+                val first = members.first()
+                val firstLimits = CardCreditLimitTools.effective(
+                    CardCreditLimitTools.decode(
+                        first.creditLimitsJson,
+                        first.sharedCreditLimitCurrency.ifBlank { first.currency },
+                        first.creditLimit
+                    )
+                )
+                val valid = members.size >= 2 &&
+                    members.all { !it.noCard && isCreditCard(it.cardCategory) } &&
+                    members.all { it.bank.trim() == first.bank.trim() } &&
+                    first.sharedCreditLimitCurrency.isNotBlank() &&
+                    members.all {
+                        it.sharedCreditLimitCurrency.equals(first.sharedCreditLimitCurrency, ignoreCase = true)
+                    } &&
+                    members.all { member ->
+                        CardCreditLimitTools.effective(
+                            CardCreditLimitTools.decode(
+                                member.creditLimitsJson,
+                                member.sharedCreditLimitCurrency.ifBlank { member.currency },
+                                member.creditLimit
+                            )
+                        ) == firstLimits
+                    }
+                if (!valid) throw Exception("备份文件中的信用卡共用额度组无效")
+            }
 
         val parsedTasks = mutableListOf<Task>()
         val legacyAssetPlans = mutableListOf<AssetPlan>()
@@ -988,7 +1143,7 @@ class AppRepository(private val db: AppDatabase, private val context: Context? =
         fun esc(s: String) = jsonEscape(s)
         val sb = StringBuilder("{")
         sb.append("\"groups\":[${grps.joinToString(",") { g -> "{\"id\":\"${g.id}\",\"name\":\"${esc(g.name)}\",\"icon\":\"${g.icon}\",\"isOpen\":${g.isOpen},\"order\":${g.sortOrder}}" }}]")
-        sb.append(",\"cards\":[${cds.joinToString(",") { c -> "{\"id\":\"${c.id}\",\"gid\":\"${c.groupId}\",\"bank\":\"${esc(c.bank)}\",\"network\":\"${c.network}\",\"currency\":\"${c.currency}\",\"tail\":\"${c.tail}\",\"role\":\"${esc(c.role)}\",\"note\":\"${esc(c.note)}\",\"status\":\"${c.status}\",\"isVirtual\":${c.isVirtual},\"noCard\":${c.noCard},\"logo\":\"${c.logoEmoji}\",\"order\":${c.sortOrder},\"expiryDate\":\"${esc(c.expiryDate)}\",\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\",\"creditLimit\":${c.creditLimit},\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay}}" }}]")
+        sb.append(",\"cards\":[${cds.joinToString(",") { c -> "{\"id\":\"${c.id}\",\"gid\":\"${c.groupId}\",\"bank\":\"${esc(c.bank)}\",\"network\":\"${c.network}\",\"currency\":\"${c.currency}\",\"tail\":\"${c.tail}\",\"role\":\"${esc(c.role)}\",\"note\":\"${esc(c.note)}\",\"status\":\"${c.status}\",\"isVirtual\":${c.isVirtual},\"noCard\":${c.noCard},\"logo\":\"${c.logoEmoji}\",\"order\":${c.sortOrder},\"expiryDate\":\"${esc(c.expiryDate)}\",\"cardCategory\":\"${esc(c.cardCategory)}\",\"imageOrientation\":\"${esc(c.imageOrientation)}\",\"creditLimit\":${c.creditLimit},\"creditLimitsJson\":\"${esc(c.creditLimitsJson)}\",\"billingDay\":${c.billingDay},\"repaymentDay\":${c.repaymentDay},\"sharedCreditLimitGroupId\":\"${esc(c.sharedCreditLimitGroupId)}\",\"sharedCreditLimitCurrency\":\"${esc(c.sharedCreditLimitCurrency)}\"}" }}]")
         val monthly = tsks.filter { it.freq=="monthly" }; val weekly = tsks.filter { it.freq=="weekly" }
         val quarterly = tsks.filter { it.freq=="quarterly" }; val ndays = tsks.filter { it.freq=="ndays" }
         val once = tsks.filter { it.freq=="once" }

@@ -34,8 +34,11 @@ data class Card(
     val sortOrder: Int = 0,
     val imageOrientation: String = "horizontal", // 卡面方向：horizontal / vertical
     val creditLimit: Double = 0.0,  // 信用卡额度
+    val creditLimitsJson: String = "", // 多币种额度 [{currency, amount}]
     val billingDay: Int = 0,        // 信用卡账单日，0 表示未设置
-    val repaymentDay: Int = 0       // 信用卡还款日，0 表示未设置
+    val repaymentDay: Int = 0,      // 信用卡还款日，0 表示未设置
+    val sharedCreditLimitGroupId: String = "", // 多张信用卡共用额度的分组 ID
+    val sharedCreditLimitCurrency: String = "" // 共用额度的计价币种；空表示独立额度
 )
 
 @Entity(tableName = "tasks")

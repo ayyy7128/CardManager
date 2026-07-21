@@ -84,6 +84,13 @@
     <string name="expiry_optional">Expiry (optional)</string>
     <string name="credit_limit">Limit</string>
     <string name="credit_limit_optional">Limit (optional)</string>
+    <string name="multi_currency_credit_limit">Limits by currency</string>
+    <string name="add_currency_limit">Add currency limit</string>
+    <string name="shared_credit_limit">Shared limit</string>
+    <string name="shared_credit_limit_summary">Share one limit with other credit cards from the same bank</string>
+    <string name="shared_credit_limit_select_cards">Select cards sharing this limit</string>
+    <string name="shared_credit_limit_no_cards">No other credit cards use the same bank</string>
+    <string name="same_bank_shared_limit">Share across this bank</string>
     <string name="billing_day">Billing day</string>
     <string name="repayment_day">Payment due day</string>
     <string name="billing_day_unset">Not set</string>

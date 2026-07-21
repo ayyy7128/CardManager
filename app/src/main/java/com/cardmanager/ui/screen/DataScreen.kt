@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cardmanager.R
 import com.cardmanager.data.AssetCalculator
+import com.cardmanager.data.CardCreditLimitTools
 import com.cardmanager.ui.components.AppPanel
 import com.cardmanager.ui.components.MetricTile
 import com.cardmanager.ui.components.SectionHeader
@@ -80,7 +81,7 @@ private data class ChartItem(val label: String, val count: Int, val color: Color
 private data class ChartSpec(val id: String, val title: String, val total: Int, val items: List<ChartItem>)
 private const val CREDIT_LIMIT_OVERVIEW_ID = "creditLimitOverview"
 
-private data class CreditLimitBankItem(val bank: String, val tail: String, val amount: Double)
+private data class CreditLimitBankItem(val bank: String, val tails: List<String>, val amount: Double)
 private data class MetricSpec(
     val id: String,
     val title: String,
@@ -192,15 +193,25 @@ fun DataScreen(vm: MainViewModel) {
     ) {
         val perCardItems = creditCards
             .asSequence()
-            .filter { it.creditLimit.isFinite() && it.creditLimit > 0.0 }
-            .map { card ->
+            .groupBy { card ->
+                card.sharedCreditLimitGroupId.takeIf { it.isNotBlank() } ?: "card:${card.id}"
+            }
+            .mapNotNull { (_, members) ->
+                val card = members.firstOrNull() ?: return@mapNotNull null
+                val fallbackCurrency = card.sharedCreditLimitCurrency.ifBlank { card.currency }
+                val limits = CardCreditLimitTools.effective(
+                    CardCreditLimitTools.decode(card.creditLimitsJson, fallbackCurrency, card.creditLimit)
+                )
+                val amount = limits.sumOf { limit ->
+                    vm.convertMoney(limit.amount, limit.currency, vaultCurrency)
+                }
+                if (!amount.isFinite() || amount <= 0.0) return@mapNotNull null
                 CreditLimitBankItem(
                     bank = card.bank.ifBlank { notSetLabel },
-                    tail = card.tail.trim(),
-                    amount = vm.convertMoney(card.creditLimit, card.currency, vaultCurrency)
+                    tails = members.map { it.tail.trim() }.filter { it.isNotBlank() },
+                    amount = amount
                 )
             }
-            .filter { it.amount.isFinite() && it.amount > 0.0 }
             .toList()
         val groupedItems = if (creditLimitGroupMode == "bank") {
             perCardItems
@@ -208,7 +219,7 @@ fun DataScreen(vm: MainViewModel) {
                 .map { (bank, items) ->
                     CreditLimitBankItem(
                         bank = bank,
-                        tail = "",
+                        tails = emptyList(),
                         amount = items.sumOf { it.amount }
                     )
                 }
@@ -221,7 +232,7 @@ fun DataScreen(vm: MainViewModel) {
                 if (rows.size <= 6) rows
                 else rows.take(5) + CreditLimitBankItem(
                     bank = otherLabel,
-                    tail = "",
+                    tails = emptyList(),
                     amount = rows.drop(5).sumOf { it.amount }
                 )
             }
@@ -575,12 +586,11 @@ private fun CreditLimitOverviewPanel(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                val tailsText = item.tails.joinToString("、") { "••$it" }
                                 Text(
-                                    if (item.tail.isBlank()) item.bank else "${item.bank} · ••${item.tail}",
+                                    if (tailsText.isBlank()) item.bank else "${item.bank} · $tailsText",
                                     fontSize = 12.sp,
                                     color = cs.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Text(

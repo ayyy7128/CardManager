@@ -84,6 +84,13 @@
     <string name="expiry_optional">有效期（选填）</string>
     <string name="credit_limit">额度</string>
     <string name="credit_limit_optional">额度（选填）</string>
+    <string name="multi_currency_credit_limit">多币种额度</string>
+    <string name="add_currency_limit">添加币种额度</string>
+    <string name="shared_credit_limit">多卡共用额度</string>
+    <string name="shared_credit_limit_summary">与同银行的其他信用卡共用同一额度</string>
+    <string name="shared_credit_limit_select_cards">选择共用额度的信用卡（可多选）</string>
+    <string name="shared_credit_limit_no_cards">暂无同银行的其他信用卡</string>
+    <string name="same_bank_shared_limit">同银行共用额度</string>
     <string name="billing_day">账单日</string>
     <string name="repayment_day">还款日</string>
     <string name="billing_day_unset">未设置</string>

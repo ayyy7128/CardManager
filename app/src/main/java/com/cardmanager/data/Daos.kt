@@ -34,6 +34,9 @@ interface CardDao {
     @Query("SELECT * FROM cards ORDER BY sortOrder ASC")
     fun getAllCards(): Flow<List<Card>>
 
+    @Query("SELECT * FROM cards ORDER BY sortOrder ASC")
+    suspend fun getAllCardsOnce(): List<Card>
+
     @Query("SELECT * FROM cards WHERE groupId = :groupId ORDER BY sortOrder ASC")
     fun getCardsInGroup(groupId: String): Flow<List<Card>>
 

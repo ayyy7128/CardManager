@@ -581,21 +581,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 note: String, status: String, isVirtual: Boolean, noCard: Boolean,
                 logoEmoji: String = "", logoImagePath: String = "", bankLogoPath: String = "",
                 cardTypeName: String = "", expiryDate: String = "", cardCategory: String = "",
-                imageOrientation: String = "horizontal", creditLimit: Double = 0.0, billingDay: Int = 0,
-                repaymentDay: Int = 0) {
+                imageOrientation: String = "horizontal", creditLimit: Double = 0.0, creditLimitsJson: String = "",
+                billingDay: Int = 0,
+                repaymentDay: Int = 0, sharedCreditCardIds: Set<String> = emptySet()) {
         viewModelScope.launch {
             val order = cards.value.count { it.groupId == groupId }
-            repo.saveCard(Card(UUID.randomUUID().toString(), groupId, bank, network, currency,
-                tail, "", note, status, isVirtual, noCard, logoEmoji, logoImagePath,
-                bankLogoPath, cardTypeName, expiryDate, cardCategory, order, imageOrientation,
-                creditLimit.coerceAtLeast(0.0), billingDay.takeIf { it in 1..31 } ?: 0,
-                repaymentDay.takeIf { it in 1..31 } ?: 0))
+            repo.saveCardWithSharedLimit(
+                Card(
+                    id = UUID.randomUUID().toString(),
+                    groupId = groupId,
+                    bank = bank,
+                    network = network,
+                    currency = currency,
+                    tail = tail,
+                    note = note,
+                    status = status,
+                    isVirtual = isVirtual,
+                    noCard = noCard,
+                    logoEmoji = logoEmoji,
+                    logoImagePath = logoImagePath,
+                    bankLogoPath = bankLogoPath,
+                    cardTypeName = cardTypeName,
+                    expiryDate = expiryDate,
+                    cardCategory = cardCategory,
+                    sortOrder = order,
+                    imageOrientation = imageOrientation,
+                    creditLimit = creditLimit.coerceAtLeast(0.0),
+                    creditLimitsJson = creditLimitsJson,
+                    billingDay = billingDay.takeIf { it in 1..31 } ?: 0,
+                    repaymentDay = repaymentDay.takeIf { it in 1..31 } ?: 0
+                ),
+                sharedCreditCardIds
+            )
         }
     }
 
     fun updateCard(c: Card) {
         viewModelScope.launch {
             repo.updateCard(c)
+            _imageVersion.value += 1
+        }
+    }
+
+    fun updateCardWithSharedLimit(c: Card, sharedCreditCardIds: Set<String>) {
+        viewModelScope.launch {
+            repo.saveCardWithSharedLimit(c, sharedCreditCardIds)
             _imageVersion.value += 1
         }
     }

@@ -138,8 +138,16 @@ object PwaImporter {
                     sortOrder     = i,
                     imageOrientation = if (o.optString("imageOrientation", "horizontal") == "vertical") "vertical" else "horizontal",
                     creditLimit   = o.optDouble("creditLimit", 0.0).coerceAtLeast(0.0),
+                    creditLimitsJson = o.optString("creditLimitsJson", ""),
                     billingDay    = o.optInt("billingDay", 0).takeIf { it in 1..31 } ?: 0,
-                    repaymentDay  = o.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0
+                    repaymentDay  = o.optInt("repaymentDay", 0).takeIf { it in 1..31 } ?: 0,
+                    sharedCreditLimitGroupId = o.optString("sharedCreditLimitGroupId", "").trim(),
+                    sharedCreditLimitCurrency = if (
+                        o.optString("sharedCreditLimitGroupId", "").isBlank()
+                    ) "" else o.optString(
+                        "sharedCreditLimitCurrency",
+                        o.optString("currency", "CNY")
+                    ).trim()
                 ))
             }
         }

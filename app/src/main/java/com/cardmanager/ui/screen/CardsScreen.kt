@@ -70,6 +70,8 @@ import com.cardmanager.data.AssetPlan
 import com.cardmanager.data.BuiltinBank
 import com.cardmanager.data.BuiltinBankCatalog
 import com.cardmanager.data.Card
+import com.cardmanager.data.CardCreditLimit
+import com.cardmanager.data.CardCreditLimitTools
 import com.cardmanager.data.CardGroup
 import com.cardmanager.data.CardResourceItem
 import com.cardmanager.data.CardResourcePackManager
@@ -695,15 +697,32 @@ fun CardPageHost(
     when (route) {
         is CardPageRoute.Add -> CardDialog(
             groups = groups,
+            cards = cards,
             selectedGroupId = route.groupId,
             onDismiss = onClose,
             asPage = true
         ) { d ->
             vm.addCard(
-                d.groupId, d.bank, d.network, d.currency, d.tail, d.note,
-                d.status, d.isVirtual, d.noCard, "", d.logoImagePath, d.bankLogoPath,
-                d.cardTypeName, d.expiryDate, d.cardCategory, d.imageOrientation,
-                d.creditLimit, d.billingDay, d.repaymentDay
+                groupId = d.groupId,
+                bank = d.bank,
+                network = d.network,
+                currency = d.currency,
+                tail = d.tail,
+                note = d.note,
+                status = d.status,
+                isVirtual = d.isVirtual,
+                noCard = d.noCard,
+                logoImagePath = d.logoImagePath,
+                bankLogoPath = d.bankLogoPath,
+                cardTypeName = d.cardTypeName,
+                expiryDate = d.expiryDate,
+                cardCategory = d.cardCategory,
+                imageOrientation = d.imageOrientation,
+                creditLimit = d.creditLimit,
+                creditLimitsJson = d.creditLimitsJson,
+                billingDay = d.billingDay,
+                repaymentDay = d.repaymentDay,
+                sharedCreditCardIds = d.sharedCreditCardIds
             )
             onClose()
         }
@@ -737,13 +756,14 @@ fun CardPageHost(
                 CardDialog(
                     initial = card,
                     groups = groups,
+                    cards = cards,
                     onDismiss = back,
                     onDelete = { deletingCard = card },
                     asPage = true
                 ) { d ->
                     val movedToNewGroup = d.groupId != card.groupId
                     val nextOrder = if (movedToNewGroup) cards.count { it.groupId == d.groupId } else card.sortOrder
-                    vm.updateCard(
+                    vm.updateCardWithSharedLimit(
                         card.copy(
                             groupId = d.groupId, bank = d.bank, network = d.network, currency = d.currency,
                             tail = d.tail, note = d.note, status = d.status,
@@ -751,9 +771,11 @@ fun CardPageHost(
                             bankLogoPath = d.bankLogoPath, cardTypeName = d.cardTypeName,
                             expiryDate = d.expiryDate, cardCategory = d.cardCategory,
                             sortOrder = nextOrder, imageOrientation = d.imageOrientation,
-                            creditLimit = d.creditLimit, billingDay = d.billingDay,
+                            creditLimit = d.creditLimit, creditLimitsJson = d.creditLimitsJson,
+                            billingDay = d.billingDay,
                             repaymentDay = d.repaymentDay
-                        )
+                        ),
+                        d.sharedCreditCardIds
                     )
                     back()
                 }
@@ -1097,7 +1119,8 @@ private fun CardFocusPage(
                     if (card.tail.isNotBlank()) FocusInfoRow(stringResource(R.string.tail_number), card.tail)
                     if (card.cardCategory.isNotBlank()) FocusInfoRow(stringResource(R.string.card_category), card.cardCategory)
                     if (card.expiryDate.isNotBlank()) FocusInfoRow(stringResource(R.string.expiry_optional), card.expiryDate)
-                    if (card.creditLimit > 0.0) FocusInfoRow(stringResource(R.string.credit_limit), "${card.currency} ${formatCreditAmount(card.creditLimit)}")
+                    val limitsText = formatCardCreditLimits(card)
+                    if (limitsText.isNotBlank()) FocusInfoRow(stringResource(R.string.credit_limit), limitsText)
                     if (card.billingDay in 1..31) FocusInfoRow(stringResource(R.string.billing_day), stringResource(R.string.billing_day_format, card.billingDay))
                     if (card.repaymentDay in 1..31) FocusInfoRow(stringResource(R.string.repayment_day), stringResource(R.string.billing_day_format, card.repaymentDay))
                     if (card.note.isNotBlank()) FocusInfoRow(stringResource(R.string.note_optional), card.note)
@@ -1312,8 +1335,9 @@ fun CardGalleryItem(
     }
     val isCreditCard = !card.noCard && card.cardCategory == "信用卡"
     val creditLimitLabel = stringResource(R.string.credit_limit)
+    val creditLimitsText = formatCardCreditLimits(card)
     val creditMetaTags = listOfNotNull(
-        if (card.creditLimit > 0.0) "$creditLimitLabel ${formatCreditAmount(card.creditLimit)}" else null,
+        creditLimitsText.takeIf { it.isNotBlank() }?.let { "$creditLimitLabel $it" },
         if (card.billingDay in 1..31) "${stringResource(R.string.billing_day)} ${stringResource(R.string.day_short_format, card.billingDay)}" else null,
         if (card.repaymentDay in 1..31) "${stringResource(R.string.repayment_day)} ${stringResource(R.string.day_short_format, card.repaymentDay)}" else null
     )
@@ -1597,8 +1621,9 @@ fun CardListItem(
     }
     val isCreditCard = !card.noCard && card.cardCategory == "信用卡"
     val creditLimitLabel = stringResource(R.string.credit_limit)
+    val creditLimitsText = formatCardCreditLimits(card)
     val creditMetaTags = listOfNotNull(
-        if (card.creditLimit > 0.0) "$creditLimitLabel ${formatCreditAmount(card.creditLimit)}" else null,
+        creditLimitsText.takeIf { it.isNotBlank() }?.let { "$creditLimitLabel $it" },
         if (card.billingDay in 1..31) "${stringResource(R.string.billing_day)} ${stringResource(R.string.day_short_format, card.billingDay)}" else null,
         if (card.repaymentDay in 1..31) "${stringResource(R.string.repayment_day)} ${stringResource(R.string.day_short_format, card.repaymentDay)}" else null
     )
@@ -1707,6 +1732,13 @@ private val creditAmountFormatter = DecimalFormat("#,##0.##")
 
 private fun formatCreditAmount(amount: Double): String =
     creditAmountFormatter.format(amount)
+
+private fun formatCardCreditLimits(card: Card): String {
+    val fallbackCurrency = card.sharedCreditLimitCurrency.ifBlank { card.currency }
+    return CardCreditLimitTools.effective(
+        CardCreditLimitTools.decode(card.creditLimitsJson, fallbackCurrency, card.creditLimit)
+    ).joinToString(" · ") { "${it.currency} ${formatCreditAmount(it.amount)}" }
+}
 
 private fun formatCreditInputAmount(amount: Double): String =
     if (amount <= 0.0) "" else DecimalFormat("0.##").format(amount)
@@ -2139,8 +2171,12 @@ data class CardFormData(
     val bankLogoPath: String, val cardTypeName: String,
     val expiryDate: String, val cardCategory: String,
     val imageOrientation: String, val groupId: String,
-    val creditLimit: Double, val billingDay: Int, val repaymentDay: Int
+    val creditLimit: Double, val creditLimitsJson: String,
+    val billingDay: Int, val repaymentDay: Int,
+    val sharedCreditCardIds: Set<String>
 )
+
+private data class CreditLimitDraft(val currency: String, val amountText: String)
 
 private enum class NfcFilledField {
     NETWORK,
@@ -2152,7 +2188,8 @@ private enum class NfcFilledField {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), selectedGroupId: String = initial?.groupId ?: "",
+fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), cards: List<Card> = emptyList(),
+               selectedGroupId: String = initial?.groupId ?: "",
                onDismiss: () -> Unit,
                onDelete: (() -> Unit)? = null, asPage: Boolean = false, onSave: (CardFormData) -> Unit) {
     var bank         by remember { mutableStateOf(initial?.bank ?: "") }
@@ -2161,7 +2198,16 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     var currency     by remember { mutableStateOf(initial?.currency ?: "CNY") }
     var tail         by remember { mutableStateOf(initial?.tail ?: "") }
     var cardCategory by remember { mutableStateOf(initial?.cardCategory ?: "") }
-    var creditLimitText by remember { mutableStateOf(formatCreditInputAmount(initial?.creditLimit ?: 0.0)) }
+    var creditLimitDrafts by remember(initial?.id) {
+        mutableStateOf(
+            CardCreditLimitTools.decode(
+                initial?.creditLimitsJson.orEmpty(),
+                initial?.sharedCreditLimitCurrency?.ifBlank { initial?.currency ?: "CNY" }
+                    ?: initial?.currency ?: "CNY",
+                initial?.creditLimit ?: 0.0
+            ).map { CreditLimitDraft(it.currency, formatCreditInputAmount(it.amount)) }
+        )
+    }
     var billingDay    by remember { mutableStateOf(initial?.billingDay?.takeIf { it in 1..31 } ?: 0) }
     var repaymentDay  by remember { mutableStateOf(initial?.repaymentDay?.takeIf { it in 1..31 } ?: 0) }
     var note         by remember { mutableStateOf(initial?.note ?: "") }
@@ -2172,6 +2218,20 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     var bankLogoPath by remember { mutableStateOf(initial?.bankLogoPath ?: "") }
     var expiryDate   by remember { mutableStateOf(initial?.expiryDate ?: "") }
     var imageOrientation by remember { mutableStateOf(initial?.imageOrientation ?: "horizontal") }
+    var sharedLimitEnabled by remember(initial?.id) {
+        mutableStateOf(initial?.sharedCreditLimitGroupId?.isNotBlank() == true)
+    }
+    var selectedSharedCardIds by remember(initial?.id, cards) {
+        mutableStateOf(
+            initial?.sharedCreditLimitGroupId
+                ?.takeIf { it.isNotBlank() }
+                ?.let { groupId ->
+                    cards.filter { it.id != initial?.id && it.sharedCreditLimitGroupId == groupId }
+                        .mapTo(mutableSetOf()) { it.id }
+                }
+                ?: emptySet()
+        )
+    }
     var submitted by remember { mutableStateOf(false) }
     var imageRefreshKey by remember { mutableStateOf(0) }
     var bankLogoRefreshKey by remember { mutableStateOf(0) }
@@ -2208,6 +2268,14 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     val nfcDisabledText = stringResource(R.string.nfc_disabled)
     val nfcFailedText = stringResource(R.string.nfc_failed)
     val resourceApplyFailedText = stringResource(R.string.resource_library_apply_failed)
+
+    fun updateCardCurrency(nextCurrency: String) {
+        val previousCurrency = currency
+        currency = nextCurrency
+        if (creditLimitDrafts.size == 1 && creditLimitDrafts.first().currency == previousCurrency) {
+            creditLimitDrafts = listOf(creditLimitDrafts.first().copy(currency = nextCurrency))
+        }
+    }
 
     fun stopNfcReader() {
         activity?.let { nfcAdapter?.disableReaderMode(it) }
@@ -2301,6 +2369,26 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
     val billingDayOptions = listOf(0 to stringResource(R.string.billing_day_unset)) +
         (1..31).map { it to stringResource(R.string.billing_day_format, it) }
     val isCreditCard = !noCard && cardCategory == "信用卡"
+    val sharedLimitCandidates = remember(cards, bank, initial?.id) {
+        cards.filter { candidate ->
+            candidate.id != initial?.id &&
+                candidate.bank.trim() == bank.trim() &&
+                !candidate.noCard &&
+                (candidate.cardCategory == "信用卡" || candidate.cardCategory.equals("credit", ignoreCase = true))
+        }
+    }
+    LaunchedEffect(isCreditCard, bank, sharedLimitCandidates) {
+        if (!isCreditCard) {
+            sharedLimitEnabled = false
+            selectedSharedCardIds = emptySet()
+        } else {
+            if (creditLimitDrafts.isEmpty()) {
+                creditLimitDrafts = listOf(CreditLimitDraft(currency, ""))
+            }
+            val candidateIds = sharedLimitCandidates.mapTo(mutableSetOf()) { it.id }
+            selectedSharedCardIds = selectedSharedCardIds.filterTo(mutableSetOf()) { it in candidateIds }
+        }
+    }
     val ungroupedLabel = stringResource(R.string.ungrouped_cards)
     val groupOptions = listOf("" to ungroupedLabel) + groups.map { it.id to it.name }
     val selectedBuiltinBank = remember(bank, ctx) { BuiltinBankCatalog.find(ctx, bank) }
@@ -2522,7 +2610,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 highlighted = NfcFilledField.CURRENCY in nfcFilledFields
                             ) {
                                 nfcFilledFields = nfcFilledFields - NfcFilledField.CURRENCY
-                                currency = it
+                                updateCardCurrency(it)
                             }
                         }
                     }
@@ -2535,7 +2623,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                         highlighted = NfcFilledField.CURRENCY in nfcFilledFields
                     ) {
                         nfcFilledFields = nfcFilledFields - NfcFilledField.CURRENCY
-                        currency = it
+                        updateCardCurrency(it)
                     }
                 }
                 // 状态 + 卡号（一行两列）
@@ -2575,7 +2663,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                                 val nextCategory = categoryOptions.find { it.second == selected }?.first ?: selected
                                 cardCategory = nextCategory
                                 if (nextCategory != "信用卡") {
-                                    creditLimitText = ""
+                                    creditLimitDrafts = emptyList()
                                     billingDay = 0
                                     repaymentDay = 0
                                 }
@@ -2612,14 +2700,173 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                     )
                 }
                 if (isCreditCard) {
-                    OutlinedTextField(
-                        value = creditLimitText,
-                        onValueChange = { creditLimitText = sanitizeCreditLimitInput(it) },
-                        label = { Text(stringResource(R.string.credit_limit_optional)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    Text(
+                        stringResource(R.string.multi_currency_credit_limit),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    creditLimitDrafts.forEachIndexed { index, draft ->
+                        val usedCurrencies = creditLimitDrafts.map { it.currency }.toSet()
+                        val availableCurrencies = currencies.filter {
+                            it == draft.currency || it !in usedCurrencies
+                        }
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(Modifier.weight(0.42f)) {
+                                DropdownField(
+                                    stringResource(R.string.currency),
+                                    availableCurrencies,
+                                    draft.currency
+                                ) { selected ->
+                                    creditLimitDrafts = creditLimitDrafts.toMutableList().also {
+                                        it[index] = draft.copy(currency = selected)
+                                    }
+                                }
+                            }
+                            OutlinedTextField(
+                                value = draft.amountText,
+                                onValueChange = { value ->
+                                    creditLimitDrafts = creditLimitDrafts.toMutableList().also {
+                                        it[index] = draft.copy(amountText = sanitizeCreditLimitInput(value))
+                                    }
+                                },
+                                label = { Text(stringResource(R.string.credit_limit_optional)) },
+                                modifier = Modifier.weight(0.58f),
+                                shape = RoundedCornerShape(12.dp),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                trailingIcon = if (creditLimitDrafts.size > 1) {
+                                    {
+                                        IconButton(onClick = {
+                                            creditLimitDrafts = creditLimitDrafts.filterIndexed { itemIndex, _ ->
+                                                itemIndex != index
+                                            }
+                                        }) {
+                                            Icon(Icons.Default.DeleteOutline, stringResource(R.string.delete))
+                                        }
+                                    }
+                                } else null
+                            )
+                        }
+                    }
+                    if (creditLimitDrafts.size < currencies.size) {
+                        TextButton(onClick = {
+                            val used = creditLimitDrafts.map { it.currency }.toSet()
+                            currencies.firstOrNull { it !in used }?.let { nextCurrency ->
+                                creditLimitDrafts = creditLimitDrafts + CreditLimitDraft(nextCurrency, "")
+                            }
+                        }) {
+                            Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.add_currency_limit))
+                        }
+                    }
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { sharedLimitEnabled = !sharedLimitEnabled },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(stringResource(R.string.shared_credit_limit), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                stringResource(R.string.shared_credit_limit_summary),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = sharedLimitEnabled,
+                            onCheckedChange = { sharedLimitEnabled = it }
+                        )
+                    }
+                    AnimatedVisibility(visible = sharedLimitEnabled) {
+                        Column(
+                            Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.shared_credit_limit_select_cards),
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (sharedLimitCandidates.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.shared_credit_limit_no_cards),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                val allCandidateIds = sharedLimitCandidates.mapTo(mutableSetOf()) { it.id }
+                                val allBankCardsSelected = allCandidateIds.all { it in selectedSharedCardIds }
+                                FilterChip(
+                                    selected = allBankCardsSelected,
+                                    onClick = {
+                                        selectedSharedCardIds = if (allBankCardsSelected) {
+                                            selectedSharedCardIds - allCandidateIds
+                                        } else {
+                                            selectedSharedCardIds + allCandidateIds
+                                        }
+                                    },
+                                    label = { Text(stringResource(R.string.same_bank_shared_limit)) },
+                                    leadingIcon = if (allBankCardsSelected) {
+                                        { Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp)) }
+                                    } else null
+                                )
+                                sharedLimitCandidates.forEach { candidate ->
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                selectedSharedCardIds = if (candidate.id in selectedSharedCardIds) {
+                                                    selectedSharedCardIds - candidate.id
+                                                } else {
+                                                    selectedSharedCardIds + candidate.id
+                                                }
+                                            }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Checkbox(
+                                            checked = candidate.id in selectedSharedCardIds,
+                                            onCheckedChange = { checked ->
+                                                selectedSharedCardIds = if (checked) {
+                                                    selectedSharedCardIds + candidate.id
+                                                } else {
+                                                    selectedSharedCardIds - candidate.id
+                                                }
+                                            }
+                                        )
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                if (candidate.cardTypeName.isBlank()) {
+                                                    stringResource(R.string.credit_card)
+                                                } else {
+                                                    candidate.cardTypeName
+                                                },
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                listOfNotNull(
+                                                    candidate.currency,
+                                                    candidate.tail.takeIf { it.isNotBlank() }?.let { "••$it" }
+                                                ).joinToString(" · "),
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.weight(1f)) {
                             val selectedBillingDayLabel = billingDayOptions
@@ -2657,7 +2904,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                             if (it) {
                                 tail = ""
                                 cardCategory = ""
-                                creditLimitText = ""
+                                creditLimitDrafts = emptyList()
                                 billingDay = 0
                                 repaymentDay = 0
                                 nfcFilledFields = nfcFilledFields - NfcFilledField.TAIL - NfcFilledField.CATEGORY - NfcFilledField.NETWORK
@@ -2675,14 +2922,36 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                         if (bank.isNotBlank()) {
                             val savingCategory = if (noCard) "" else cardCategory.ifBlank { "储蓄卡" }
                             val savingCredit = savingCategory == "信用卡"
-                            onSave(CardFormData(bank.trim(), network, currency,
-                                if (noCard) "" else tail.trim(), note.trim(), status, isVirtual, noCard,
-                                imagePath, bankLogoPath, cardTypeName.trim(),
-                                expiryDate, savingCategory,
-                                imageOrientation, groupId,
-                                if (savingCredit) creditLimitText.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0 else 0.0,
-                                if (savingCredit) billingDay.takeIf { it in 1..31 } ?: 0 else 0,
-                                if (savingCredit) repaymentDay.takeIf { it in 1..31 } ?: 0 else 0))
+                            val savingLimits = if (savingCredit) {
+                                creditLimitDrafts.mapNotNull { draft ->
+                                    val amount = draft.amountText.toDoubleOrNull()?.takeIf { it.isFinite() }?.coerceAtLeast(0.0)
+                                    amount?.let { CardCreditLimit(draft.currency, it) }
+                                }
+                            } else emptyList()
+                            onSave(CardFormData(
+                                bank = bank.trim(),
+                                network = network,
+                                currency = currency,
+                                tail = if (noCard) "" else tail.trim(),
+                                note = note.trim(),
+                                status = status,
+                                isVirtual = isVirtual,
+                                noCard = noCard,
+                                logoImagePath = imagePath,
+                                bankLogoPath = bankLogoPath,
+                                cardTypeName = cardTypeName.trim(),
+                                expiryDate = expiryDate,
+                                cardCategory = savingCategory,
+                                imageOrientation = imageOrientation,
+                                groupId = groupId,
+                                creditLimit = CardCreditLimitTools.legacyAmount(savingLimits, currency),
+                                creditLimitsJson = if (savingCredit) CardCreditLimitTools.encode(savingLimits) else "",
+                                billingDay = if (savingCredit) billingDay.takeIf { it in 1..31 } ?: 0 else 0,
+                                repaymentDay = if (savingCredit) repaymentDay.takeIf { it in 1..31 } ?: 0 else 0,
+                                sharedCreditCardIds = if (savingCredit && sharedLimitEnabled) {
+                                    selectedSharedCardIds
+                                } else emptySet()
+                            ))
                         }
                     }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.save)) }
                 }
@@ -2726,12 +2995,12 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                         if (item.bank.isNotBlank()) bank = item.bank
                         if (item.name.isNotBlank()) cardTypeName = item.name
                         network = item.network
-                        currency = item.currency
+                        updateCardCurrency(item.currency)
                         noCard = false
                         if (item.cardCategory.isNotBlank()) {
                             cardCategory = item.cardCategory
                             if (cardCategory != "信用卡") {
-                                creditLimitText = ""
+                                creditLimitDrafts = emptyList()
                                 billingDay = 0
                                 repaymentDay = 0
                             }
@@ -2859,7 +3128,7 @@ fun CardDialog(initial: Card? = null, groups: List<CardGroup> = emptyList(), sel
                     filled += NfcFilledField.NETWORK
                 }
                 result.currencyCode()?.takeIf { it in currencies }?.let {
-                    currency = it
+                    updateCardCurrency(it)
                     filled += NfcFilledField.CURRENCY
                 }
                 result.panLast4?.let {
